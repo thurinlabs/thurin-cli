@@ -82,6 +82,17 @@ The link opens on thurin.id/attest, where *any* wallet can publish it and pay th
 
 Know the edge: an address with no ETH can't recall a slip, so the deadline is your only safety. It is printed every time, and a slip can be used once.
 
+## Records: the chain names what you put out
+
+A record is a small value on your claim, set only by you, readable by anyone. The first kind is `thurin.pointer`: the releases you have put out, each named by the sha256 of its checksum file.
+
+```bash
+thurin record add-release "thurin-cli 0.6.0" SHA256SUMS --url https://github.com/thurinlabs/thurin-cli/releases/tag/v0.6.0
+thurin record get thurinlabs.eth pointer
+```
+
+With that, a signed release is not just one your key signed but one your identity named on-chain: a stolen key can still sign a tarball, but it cannot make the chain name it without a transaction from your address. `record set <kind> <value|--file f>` and `record clear <kind>` handle any kind; values are capped at 1 KB and the pointer record drops its oldest entries when full (they stay in chain history).
+
 ## Be a keyserver
 
 gpg has asked keyservers for keys the same way since the 1990s. `thurin keyserver` answers that question by reading the registry, so plain gpg pulls keys from Ethereum without knowing it:

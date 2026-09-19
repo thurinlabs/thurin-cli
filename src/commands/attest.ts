@@ -66,7 +66,7 @@ export async function send(ctx: ChainCtx, opts: Record<string, any>, functionNam
 function identityUrl(ctx: ChainCtx, owner: Address) { return `https://thurin.id/eth/${owner}` }
 function txUrl(ctx: ChainCtx, hash: string) { return ctx.explorerUrl ? `${ctx.explorerUrl}/tx/${hash}` : hash }
 
-async function ownerFor(ctx: ChainCtx, opts: Record<string, any>): Promise<Address> {
+export async function ownerFor(ctx: ChainCtx, opts: Record<string, any>): Promise<Address> {
   if (opts.noKey && opts.authorize) throw new CliError('--no-key and --authorize are different exits: --no-key when your ETH wallet is elsewhere, --authorize when the keystore here has no ETH', EXIT.USAGE)
   if (opts.noKey) {
     // Hand-off: the wallet that will publish lives elsewhere, so the address is given, not derived.
@@ -103,16 +103,17 @@ function buildHandoff(ctx: ChainCtx, opts: Record<string, any>, op: HandoffOp, o
     includeEmail: !!opts.includeEmail,
     ...(p?.signature ? { signature: p.signature } : {}),
     ...(index !== undefined ? { index } : {}),
+    ...(opts._record ? { kind: opts._record.kind, value: opts._record.value } : {}),
   }
 }
 
 function siteFor(opts: Record<string, any>): string { return opts.site || readConfig().site || 'https://thurin.id' }
 
-function handoff(ctx: ChainCtx, opts: Record<string, any>, op: HandoffOp, owner: Address, fpr: string, p: Preflight, index?: number) {
+export function handoff(ctx: ChainCtx, opts: Record<string, any>, op: HandoffOp, owner: Address, fpr: string, p: Preflight | null, index?: number) {
   const h = buildHandoff(ctx, opts, op, owner, fpr, p, index)
   const url = handoffUrl(siteFor(opts), h)
   if (ctx.network !== 'mainnet' && !opts.site) info(`thurin.id runs mainnet; for ${ctx.network} open this on a ${ctx.network} build (--site http://localhost:5173).`)
-  out({ handoff: true, op, owner, fingerprint: fpr, network: ctx.network, index, proofs: p.proofs, url }, () =>
+  out({ handoff: true, op, owner, fingerprint: fpr, network: ctx.network, index, proofs: p?.proofs, url }, () =>
     `${ok('Ready to publish')} ${bold(fpr)} for ${owner}${index !== undefined ? ` (claim #${index})` : ''}\n` +
     `Open this link where that wallet is (the part after # never leaves your browser) and confirm:\n\n${url}\n`)
 }
@@ -123,7 +124,7 @@ function handoff(ctx: ChainCtx, opts: Record<string, any>, op: HandoffOp, owner:
  * a friend, `thurin submit`, or a relayer. The owner cannot recall it before the deadline,
  * so the deadline is shown every time.
  */
-async function authorize(ctx: ChainCtx, opts: Record<string, any>, op: HandoffOp, owner: Address, fpr: string, p: Preflight | null, index?: number) {
+export async function authorize(ctx: ChainCtx, opts: Record<string, any>, op: HandoffOp, owner: Address, fpr: string, p: Preflight | null, index?: number) {
   const account = await accountFor(opts)
   if (account.address.toLowerCase() !== owner.toLowerCase()) throw new CliError(`--authorize signs with the keystore's own address (${account.address}); it cannot authorize for ${owner}`, EXIT.USAGE)
   const nonce = Number(await ctx.client.readContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: 'nonces', args: [owner] } as any))
@@ -282,7 +283,7 @@ export async function revoke(args: string[], opts: Record<string, any>) {
   out({ ...r, owner, index: idx, tx: txUrl(ctx, r.hash) }, () => `${bad('Revoked')} claim #${idx}\n${label('tx')}${txUrl(ctx, r.hash)}`)
 }
 
-function pickIndex(arg: string | undefined, claims: { revokedAt: number | null }[]): number {
+export function pickIndex(arg: string | undefined, claims: { revokedAt: number | null }[]): number {
   if (arg !== undefined) { const i = Number(arg); if (!Number.isInteger(i) || i < 0 || i >= claims.length) throw new CliError(`No claim #${arg} (this address has ${claims.length})`, EXIT.USAGE); return i }
   const active = claims.map((c, i) => [c, i] as const).filter(([c]) => !c.revokedAt)
   if (active.length === 1) return active[0][1]

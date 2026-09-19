@@ -13,11 +13,11 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { stringToHex, type Address, type Hex } from 'viem'
 import {
-  fingerprintToBytes, attestTypedData, reattestTypedData, updateKeyTypedData, revokeTypedData,
+  fingerprintToBytes, attestTypedData, reattestTypedData, updateKeyTypedData, revokeTypedData, setRecordTypedData, recordKind,
 } from '@thurinlabs/identity-kit/core'
 
-export type HandoffOp = 'attest' | 'reattest' | 'update-key' | 'revoke'
-const OPS: HandoffOp[] = ['attest', 'reattest', 'update-key', 'revoke']
+export type HandoffOp = 'attest' | 'reattest' | 'update-key' | 'revoke' | 'set-record'
+const OPS: HandoffOp[] = ['attest', 'reattest', 'update-key', 'revoke', 'set-record']
 
 export interface Authorization {
   nonce: number
@@ -38,14 +38,17 @@ export interface Handoff {
   key?: string
   /** Clearsigned statement; absent for update-key and revoke, which need no new signature. */
   signature?: string
-  /** Claim index to replace (reattest), update (update-key), or revoke. */
+  /** Claim index to replace (reattest), update (update-key), revoke, or set a record on. */
   index?: number
+  /** set-record: the record kind name (thurin.pointer) and UTF-8 value ('' clears). */
+  kind?: string
+  value?: string
   includeEmail: boolean
   authorization?: Authorization
 }
 
 export const HANDOFF_PARAM = 'handoff'
-export const FOR_FN: Record<HandoffOp, string> = { attest: 'attestFor', reattest: 'reattestFor', 'update-key': 'updateKeyFor', revoke: 'revokeFor' }
+export const FOR_FN: Record<HandoffOp, string> = { attest: 'attestFor', reattest: 'reattestFor', 'update-key': 'updateKeyFor', revoke: 'revokeFor', 'set-record': 'setRecordFor' }
 
 export function encodeHandoff(h: Handoff): string {
   return Buffer.from(JSON.stringify(h), 'utf8').toString('base64url')
@@ -57,7 +60,8 @@ export function decodeHandoff(encoded: string): Handoff {
   if (h?.v !== 1 || !OPS.includes(h.op)) throw new Error('Not a Thurin hand-off')
   if (!/^0x[0-9a-f]{40}$/.test(h.owner || '')) throw new Error('Hand-off has no valid owner')
   if (h.op !== 'attest' && !Number.isInteger(h.index)) throw new Error('Hand-off names no claim index')
-  if (h.op !== 'revoke' && typeof h.key !== 'string') throw new Error('Hand-off carries no key')
+  if (h.op !== 'revoke' && h.op !== 'set-record' && typeof h.key !== 'string') throw new Error('Hand-off carries no key')
+  if (h.op === 'set-record' && (typeof h.kind !== 'string' || typeof h.value !== 'string')) throw new Error('Hand-off names no record')
   if ((h.op === 'attest' || h.op === 'reattest') && typeof h.signature !== 'string') throw new Error('Hand-off carries no signed statement')
   if (h.authorization != null) {
     const a = h.authorization
@@ -92,6 +96,7 @@ export function typedDataFor(h: Handoff, chainId: number, registry: Address) {
     case 'reattest': return reattestTypedData(chainId, registry, { ...common, revokeIndex: BigInt(h.index!), fingerprint: h.fingerprint, pgpSignature: h.signature!, pgpPublicKey: h.key! })
     case 'update-key': return updateKeyTypedData(chainId, registry, { ...common, index: BigInt(h.index!), pgpPublicKey: h.key! })
     case 'revoke': return revokeTypedData(chainId, registry, { ...common, index: BigInt(h.index!) })
+    case 'set-record': return setRecordTypedData(chainId, registry, { ...common, index: BigInt(h.index!), kind: recordKind(h.kind!), value: h.value ? stringToHex(h.value) : '0x' })
   }
 }
 
@@ -104,6 +109,7 @@ export function forArgsOf(h: Handoff): unknown[] {
     case 'reattest': return [h.owner, BigInt(h.index!), fingerprintToBytes(h.fingerprint), stringToHex(h.signature!), stringToHex(h.key!), d, a.signature]
     case 'update-key': return [h.owner, BigInt(h.index!), stringToHex(h.key!), d, a.signature]
     case 'revoke': return [h.owner, BigInt(h.index!), d, a.signature]
+    case 'set-record': return [h.owner, BigInt(h.index!), recordKind(h.kind!), h.value ? stringToHex(h.value) : '0x', d, a.signature]
   }
 }
 

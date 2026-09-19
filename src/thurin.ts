@@ -6,6 +6,7 @@ import { wallet } from './commands/wallet.js'
 import { attest, updateKey, reattest, revoke, submit } from './commands/attest.js'
 import { relay } from './commands/relay.js'
 import { keyserver } from './commands/keyserver.js'
+import { record } from './commands/record.js'
 import { setJson, CliError, EXIT, bold, dim } from './lib/output.js'
 
 const { version } = createRequire(import.meta.url)('../package.json') as { version: string }
@@ -40,6 +41,11 @@ ${bold('Claims')} (each runs every check before spending gas)
       [--relayer <url> | --no-relayer]          post it to a relayer that pays, instead of a link
   thurin submit <link|file>                     publish someone's authorization from this keystore
 
+${bold('Records')} (small values on your claim; the chain names what you put out)
+  thurin record get <identity> <kind>           anyone can read; thurin.pointer lists releases
+  thurin record add-release <name> <SHA256SUMS> [--url u]   name a release on-chain by its checksum file
+  thurin record set <kind> <value|--file f> | clear <kind>
+
 ${bold('Be a keyserver')} (gpg reads keys from Ethereum; no upload, no database)
   thurin keyserver [--port 11371] [--host 127.0.0.1] [--cache-seconds 60]
   then: gpg --keyserver hkp://127.0.0.1:11371 --recv-keys <fingerprint>
@@ -68,7 +74,7 @@ async function main() {
       'no-key': { type: 'boolean' }, owner: { type: 'string' }, site: { type: 'string' },
       authorize: { type: 'boolean' }, deadline: { type: 'string' }, out: { type: 'string' },
       relayer: { type: 'string' }, 'no-relayer': { type: 'boolean' },
-      budget: { type: 'string' }, port: { type: 'string' }, host: { type: 'string' }, 'cache-seconds': { type: 'string' }, 'per-hour': { type: 'string' }, 'free-attests': { type: 'string' }, 'max-gas': { type: 'string' },
+      budget: { type: 'string' }, port: { type: 'string' }, host: { type: 'string' }, 'cache-seconds': { type: 'string' }, file: { type: 'string' }, index: { type: 'string' }, url: { type: 'string' }, 'per-hour': { type: 'string' }, 'free-attests': { type: 'string' }, 'max-gas': { type: 'string' },
     },
   })
   const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'], noRelayer: values['no-relayer'], perHour: values['per-hour'], freeAttests: values['free-attests'], maxGas: values['max-gas'], cacheSeconds: values['cache-seconds'] }
@@ -88,6 +94,7 @@ async function main() {
     case 'submit': return submit(rest, opts)
     case 'relay': return relay(rest, opts)
     case 'keyserver': return keyserver(rest, opts)
+    case 'record': return record(rest, opts)
     default: throw new CliError(`Unknown command "${cmd}". Try: thurin --help`, EXIT.USAGE)
   }
 }

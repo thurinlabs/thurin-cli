@@ -62,8 +62,15 @@ export async function keyserver(_args: string[], opts: Record<string, any>) {
     if (!entries.length) { log(req, 'not found'); return text(res, 404, 'No key found') }
     log(req, `${op} ${entries.length} key(s)`)
     if (op === 'get') {
-      res.writeHead(200, { 'content-type': 'application/pgp-keys', 'cache-control': `max-age=${ttl / 1000}` })
-      res.end(entries.map(e => e.armored).join('\n'))
+      const body = entries.map(e => e.armored).join('\n')
+      // gpg gets the keyserver media type. A browser (Accept: text/html) gets the same bytes
+      // shown as text instead of a download; anything else downloads under a sensible name.
+      const browser = /text\/html/.test(req.headers.accept || '')
+      const name = `${entries.map(e => e.fingerprint).join('+')}.asc`
+      res.writeHead(200, browser
+        ? { 'content-type': 'text/plain; charset=utf-8', 'cache-control': `max-age=${ttl / 1000}` }
+        : { 'content-type': 'application/pgp-keys', 'content-disposition': `inline; filename="${name}"`, 'cache-control': `max-age=${ttl / 1000}` })
+      res.end(body)
       return
     }
     // Machine-readable index (options=mr), the form dirmngr parses.
