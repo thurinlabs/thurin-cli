@@ -68,6 +68,20 @@ thurin attest --no-key --owner yourname.eth      # or --owner 0x…
 
 It signs, exports, and runs every check, then prints a `thurin.id/attest#…` link instead of sending. Open that link where the wallet is, connect the address you named, and publish. The signed statement and key travel in the part of the link after `#`, which browsers never send to any server, so nothing passes through Thurin. `reattest` and `update-key` take `--no-key` too. No keystore, password, or ETH is needed on this machine.
 
+## Your address has no ETH
+
+Then sign a permission slip instead of a transaction:
+
+```bash
+thurin attest --authorize                  # keystore signs typed data (free); prints a link anyone can publish
+thurin attest --authorize --deadline 1d    # default is 7d
+thurin attest --authorize --out auth.json  # a file instead of a link, for scripts
+```
+
+The link opens on thurin.id/attest, where *any* wallet can publish it and pay the fee; the claim lands under your address, not theirs. Or someone with a funded keystore runs `thurin submit <link or file>`. `reattest`, `update-key`, and `revoke` take `--authorize` too. Before handing it out, the CLI proves the signature recovers to your address and simulates the call against the registry.
+
+Know the edge: an address with no ETH can't recall a slip, so the deadline is your only safety. It is printed every time, and a slip can be used once.
+
 ## Keys
 
 ```bash
@@ -96,7 +110,7 @@ Keystores are the same format `cast`, geth, and every wallet import. `--password
 
 ## What's next
 
-`authorize` and `submit` (attest from an address that has never held ETH, no browser at all), `init` (one guided run), `keyserver` (an HKP server for gpg backed by the chain), and `--anon`. See the [roadmap](https://docs.thurin.id/#/roadmap).
+the relayer (`--authorize` sends straight to a service that pays; anyone can run one), `init` (one guided run), `keyserver` (an HKP server for gpg backed by the chain), and `--anon`. See the [roadmap](https://docs.thurin.id/#/roadmap).
 
 ## Development
 

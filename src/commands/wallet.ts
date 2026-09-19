@@ -1,3 +1,4 @@
+import pc from 'picocolors'
 import { readFileSync } from 'node:fs'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { generateMnemonic, mnemonicToAccount } from 'viem/accounts'
@@ -38,10 +39,24 @@ async function create(args: string[], opts: Record<string, any>) {
   const path = saveKeystore(name, encryptKeystore(pk, pw))
   const cfg = readConfig(); if (!cfg.account) { cfg.account = name; writeConfig(cfg) }
   out({ name, address: acct.address, path, mnemonic }, () =>
-    `${ok('Created')} ${bold(acct.address)}  ${dim(path)}\n\n${label('recovery')}${mnemonic}\n${warnLine()}\n${label('next')}thurin attest --account ${name}`)
+    `${ok('Created')} ${bold(acct.address)}  ${dim(path)}\n\n${recoveryBlock(mnemonic)}\n${label('next')}thurin attest --account ${name}`)
 }
 
-function warnLine() { return dim('Write those 12 words down, offline. They are shown once and the CLI does not keep them.') }
+/** The one thing a user must not scroll past: the words are shown once and the CLI does not keep them. */
+function recoveryBlock(mnemonic: string) {
+  const words = mnemonic.split(' ')
+  const rows = [0, 4, 8].map(i => words.slice(i, i + 4).map((w, j) => `${String(i + j + 1).padStart(2)}. ${w.padEnd(10)}`).join(' '))
+  const rule = '─'.repeat(64)
+  return [
+    pc.yellow(rule),
+    pc.yellow(bold('  RECOVERY PHRASE — write these 12 words down, offline, now.')),
+    pc.yellow('  Shown once. Not kept anywhere. Anyone with them controls this address.'),
+    '',
+    ...rows.map(r => '  ' + bold(r)),
+    '',
+    pc.yellow(rule),
+  ].join('\n')
+}
 
 async function importWallet(args: string[], opts: Record<string, any>) {
   const name = args[0]

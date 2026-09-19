@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import { status } from './commands/status.js'
 import { key } from './commands/key.js'
 import { wallet } from './commands/wallet.js'
-import { attest, updateKey, reattest, revoke } from './commands/attest.js'
+import { attest, updateKey, reattest, revoke, submit } from './commands/attest.js'
 import { setJson, CliError, EXIT, bold, dim } from './lib/output.js'
 
 const { version } = createRequire(import.meta.url)('../package.json') as { version: string }
@@ -33,10 +33,13 @@ ${bold('Claims')} (each runs every check before spending gas)
   thurin revoke [<index>]
   … --no-key --owner <address|ens>              sign here, publish from a wallet elsewhere: prints a
                                                 thurin.id/attest link that carries the signed claim
+  … --authorize [--deadline 7d] [--out f.json]  no ETH here: the keystore signs a permission slip
+                                                (free) that anyone can publish and pay for
+  thurin submit <link|file>                     publish someone's authorization from this keystore
 
 ${bold('Options')}
   --network mainnet|sepolia|local   --rpc <url>   --account <name>   --password-file <path>
-  --site <url>   (where --no-key links point; default https://thurin.id)
+  --site <url>   (where --no-key / --authorize links point; default https://thurin.id)
   --json   --yes   --version   --help
 
 Exit codes: 0 ok · 1 a check failed · 2 usage · 3 chain or network error
@@ -53,6 +56,7 @@ async function main() {
       key: { type: 'string', short: 'k' }, 'include-email': { type: 'boolean' }, replace: { type: 'boolean' }, import: { type: 'boolean' },
       name: { type: 'string' }, expires: { type: 'string' }, from: { type: 'string' }, 'private-key': { type: 'boolean' },
       'no-key': { type: 'boolean' }, owner: { type: 'string' }, site: { type: 'string' },
+      authorize: { type: 'boolean' }, deadline: { type: 'string' }, out: { type: 'string' },
     },
   })
   const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'] }
@@ -69,6 +73,7 @@ async function main() {
     case 'update-key': return updateKey(rest, opts)
     case 'reattest': return reattest(rest, opts)
     case 'revoke': return revoke(rest, opts)
+    case 'submit': return submit(rest, opts)
     default: throw new CliError(`Unknown command "${cmd}". Try: thurin --help`, EXIT.USAGE)
   }
 }
