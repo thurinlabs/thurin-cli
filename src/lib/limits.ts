@@ -10,11 +10,15 @@ export interface LimitsConfig {
   perCallerPerHour: number
   /** `attest` calls per owner address, ever (per process). Other ops are rate-limited only. */
   attestsPerOwner: number
-  /** Hard cap on gas per transaction; defeats an owner whose contract wallet burns gas in isValidSignature. */
+  /**
+   * Hard cap on gas per transaction; bounds an owner whose contract wallet burns gas in
+   * isValidSignature. An attest stores the key + signature (SSTORE2, ~200 gas/byte): ~700k
+   * for a small key, ~2.5M for the 8 KB + 4 KB the registry allows. 3M covers every honest call.
+   */
   maxGas: bigint
 }
 
-export const DEFAULT_LIMITS: LimitsConfig = { budgetEth: 0.01, perCallerPerHour: 10, attestsPerOwner: 1, maxGas: 600_000n }
+export const DEFAULT_LIMITS: LimitsConfig = { budgetEth: 0.01, perCallerPerHour: 10, attestsPerOwner: 1, maxGas: 3_000_000n }
 
 export class LimitError extends Error {
   constructor(message: string, public status: number) { super(message) }

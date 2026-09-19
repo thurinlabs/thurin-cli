@@ -40,7 +40,7 @@ ${bold('Claims')} (each runs every check before spending gas)
   thurin submit <link|file>                     publish someone's authorization from this keystore
 
 ${bold('Run a relayer')} (the one command that spends: gas only, within a budget, from a hot key)
-  thurin relay --account <hot> [--budget 0.01] [--port 8787] [--free-attests 1] [--per-hour 10]
+  thurin relay --account <hot> [--budget 0.01] [--port 8787] [--free-attests 1] [--per-hour 10] [--max-gas 3000000]
 
 ${bold('Options')}
   --network mainnet|sepolia|local   --rpc <url>   --account <name>   --password-file <path>
@@ -63,10 +63,10 @@ async function main() {
       'no-key': { type: 'boolean' }, owner: { type: 'string' }, site: { type: 'string' },
       authorize: { type: 'boolean' }, deadline: { type: 'string' }, out: { type: 'string' },
       relayer: { type: 'string' }, 'no-relayer': { type: 'boolean' },
-      budget: { type: 'string' }, port: { type: 'string' }, host: { type: 'string' }, 'per-hour': { type: 'string' }, 'free-attests': { type: 'string' },
+      budget: { type: 'string' }, port: { type: 'string' }, host: { type: 'string' }, 'per-hour': { type: 'string' }, 'free-attests': { type: 'string' }, 'max-gas': { type: 'string' },
     },
   })
-  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'], noRelayer: values['no-relayer'], perHour: values['per-hour'], freeAttests: values['free-attests'] }
+  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'], noRelayer: values['no-relayer'], perHour: values['per-hour'], freeAttests: values['free-attests'], maxGas: values['max-gas'] }
   setJson(!!opts.json)
   if (opts.version) { process.stdout.write(version + '\n'); return }
   const [cmd, ...rest] = positionals

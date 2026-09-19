@@ -93,7 +93,7 @@ thurin relay --account hot --budget 0.01      # ETH per day; also --free-attests
 
 Then `thurin attest --authorize --relayer https://relay.example` publishes without a link, and `"relayer"` in `~/.config/thurin/config.json` makes that the default (`--no-relayer` gets a link anyway). `GET /` reports the budget and what's been spent.
 
-This is the one command that spends unattended. It spends gas only, one transaction at a time, never more than the budget per rolling day, and refuses calls over 600k gas. Treat the key as pocket money: a drained relayer loses its budget, not anyone's identity. Put nginx or another TLS proxy in front; it listens on localhost by default and trusts `X-Forwarded-For` for rate limits.
+This is the one command that spends unattended. It spends gas only, one transaction at a time, never more than the budget per rolling day, and refuses calls over 3M gas (`--max-gas`). Treat the key as pocket money: a drained relayer loses its budget, not anyone's identity. Put nginx or another TLS proxy in front; it listens on localhost by default and trusts `X-Forwarded-For` for rate limits.
 
 ## Keys
 

@@ -35,6 +35,6 @@ describe('relayer limits', () => {
   })
   it('refuses a gas-burning call outright', () => {
     const l = new Limits(cfg)
-    expect(() => l.check('a', '0x1', 'attest', 600_000n, 0)).toThrow(/gas/)
+    expect(() => l.check('a', '0x1', 'attest', 600_000n, 0)).toThrow(/gas/)   // cfg.maxGas is 500k here
   })
 })

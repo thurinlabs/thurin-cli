@@ -27,7 +27,7 @@ export async function relay(_args: string[], opts: Record<string, any>) {
     budgetEth: opts.budget !== undefined ? Number(opts.budget) : DEFAULT_LIMITS.budgetEth,
     perCallerPerHour: opts.perHour !== undefined ? Number(opts.perHour) : DEFAULT_LIMITS.perCallerPerHour,
     attestsPerOwner: opts.freeAttests !== undefined ? Number(opts.freeAttests) : DEFAULT_LIMITS.attestsPerOwner,
-    maxGas: DEFAULT_LIMITS.maxGas,
+    maxGas: opts.maxGas !== undefined ? BigInt(opts.maxGas) : DEFAULT_LIMITS.maxGas,
   })
   if (!(limits.cfg.budgetEth > 0)) throw new CliError('--budget must be a positive amount of ETH per day', EXIT.USAGE)
   const host: string = opts.host || '127.0.0.1'
@@ -36,7 +36,7 @@ export async function relay(_args: string[], opts: Record<string, any>) {
 
   const balance = await ctx.client.getBalance({ address: account.address })
   process.stderr.write(`${ok('thurin relay')} on ${ctx.network} · paying from ${bold(account.address)} (${formatEther(balance)} ETH)\n` +
-    `${label('budget')}${limits.cfg.budgetEth} ETH/day · ${limits.cfg.attestsPerOwner} free attest per address · ${limits.cfg.perCallerPerHour} requests/hour per caller\n` +
+    `${label('budget')}${limits.cfg.budgetEth} ETH/day · ${limits.cfg.attestsPerOwner} free attest per address · ${limits.cfg.perCallerPerHour} requests/hour per caller · ≤ ${limits.cfg.maxGas} gas/tx\n` +
     `${label('listen')}http://${host}:${port}  ${dim('(put nginx or another TLS proxy in front)')}\n`)
   if (balance === 0n) warn('The paying account holds no ETH; every request will fail until it is funded.')
 
