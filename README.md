@@ -82,6 +82,23 @@ The link opens on thurin.id/attest, where *any* wallet can publish it and pay th
 
 Know the edge: an address with no ETH can't recall a slip, so the deadline is your only safety. It is printed every time, and a slip can be used once.
 
+## Be a keyserver
+
+gpg has asked keyservers for keys the same way since the 1990s. `thurin keyserver` answers that question by reading the registry, so plain gpg pulls keys from Ethereum without knowing it:
+
+```bash
+thurin keyserver                          # hkp://127.0.0.1:11371
+gpg --keyserver hkp://127.0.0.1:11371 --recv-keys 08B9374FDFBEC67EFFA24E669D3D86E35361EF7B
+```
+
+Make it the default and everything built on gpg follows: `--refresh-keys` picks up on-chain revocations, `--locate-keys` works, and with `auto-key-retrieve` set, `git log --show-signature` fetches unknown keys on its own.
+
+```bash
+echo "keyserver hkp://127.0.0.1:11371" >> ~/.gnupg/dirmngr.conf && gpgconf --kill dirmngr
+```
+
+Search by fingerprint, key ID, address, or ENS name. Email search returns nothing, on purpose. There is no upload: keys are published by attesting, so nobody can attach anything to yours. A fetch by full fingerprint is self-authenticating, gpg checks the key hashes to what it asked for, so a keyserver can withhold but never substitute. Thurin runs one at `hkps://keys.thurin.id` for people without the CLI; the local one is the real thing.
+
 ## Run a relayer
 
 A relayer is `thurin submit` behind an HTTP port: it accepts the same JSON a hand-off link carries, runs the same checks, and pays for the `…For` call from a hot keystore, within limits you set.
@@ -123,7 +140,7 @@ Keystores are the same format `cast`, geth, and every wallet import. `--password
 
 ## What's next
 
-`init` (one guided run), `keyserver` (an HKP server for gpg backed by the chain), and `--anon`, `init` (one guided run), `keyserver` (an HKP server for gpg backed by the chain), and `--anon`. See the [roadmap](https://docs.thurin.id/#/roadmap).
+`init` (one guided run) and `--anon` (fresh keys, no proofs, Tor by default). See the [roadmap](https://docs.thurin.id/#/roadmap).
 
 ## Development
 
