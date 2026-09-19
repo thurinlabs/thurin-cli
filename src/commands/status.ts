@@ -13,7 +13,11 @@ export async function status(args: string[], opts: Record<string, any>) {
   for (const owner of owners) {
     const claims = await claimsOf(ctx, owner)
     const name = ensName ?? await ensNameOf(ctx, owner)
-    const current = claims.find(c => !c.revokedAt && c.verification?.verified) || null
+    // The claim to show: when the query names a key, that key's claim; else the newest verified one.
+    const active = claims.filter(c => !c.revokedAt && c.verification?.verified)
+    const current = (lookup.type === 'fingerprint' ? active.find(c => c.fingerprint === lookup.value)
+      : lookup.type === 'keyId' ? active.find(c => c.fingerprint.endsWith(lookup.value))
+      : null) ?? active[active.length - 1] ?? null
     let proofs: { provider: string; label: string; display: string; url: string; verified: boolean; reason?: string }[] = []
     if (current?.keyInfo) {
       const ps = current.keyInfo.notations.map(identifyProof).filter((p): p is NonNullable<typeof p> => !!p)
