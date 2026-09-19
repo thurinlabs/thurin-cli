@@ -55,7 +55,7 @@ async function main() {
   setJson(!!opts.json)
   if (opts.version) { process.stdout.write(version + '\n'); return }
   const [cmd, ...rest] = positionals
-  if (opts.help || !cmd) { process.stdout.write(HELP); process.exitCode = cmd ? 0 : EXIT.USAGE; return }
+  if (opts.help || !cmd) { process.stdout.write(HELP); process.exitCode = opts.help ? 0 : EXIT.USAGE; return }  // bare `thurin` is a usage error; `--help` is not
 
   switch (cmd) {
     case 'status': return status(rest, opts)
