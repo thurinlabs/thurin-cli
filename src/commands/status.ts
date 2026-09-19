@@ -39,7 +39,7 @@ function render(i: any): string {
   if (i.current) {
     L.push(`${label('fingerprint')}${i.current.fingerprint}  ${ok('✓ verified')}`)
     for (const u of i.current.keyInfo?.userIDs ?? []) L.push(`${label('name')}${u}`)
-    L.push(`${label('key')}${i.current.keyInfo?.algorithm ?? '?'} · created ${new Date(i.current.createdAt * 1000).toISOString().slice(0, 10)}${i.current.keyInfo?.expires ? ` · expires ${i.current.keyInfo.expires.slice(0, 10)}` : ''}`)
+    L.push(`${label('key')}${i.current.keyInfo?.algorithm ?? '?'} · ${i.current.keyInfo?.created ? `created ${i.current.keyInfo.created.slice(0, 10)} · ` : ''}claimed ${new Date(i.current.createdAt * 1000).toISOString().slice(0, 10)}${i.current.keyInfo?.expires ? ` · expires ${i.current.keyInfo.expires.slice(0, 10)}` : ''}`)
   } else {
     const c = i.claims.find((c: Claim) => !c.revokedAt)
     L.push(`${label('fingerprint')}${c ? c.fingerprint : i.claims[0].fingerprint}  ${bad('✗ ' + (c?.verification?.reason || 'no active claim'))}`)

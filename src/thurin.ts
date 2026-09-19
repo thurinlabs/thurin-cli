@@ -31,9 +31,12 @@ ${bold('Claims')} (each runs every check before spending gas)
   thurin update-key [<index>] [--include-email] new proofs on the same key, no new signature
   thurin reattest [<index>] [--key <fpr>]       revoke + publish in one transaction
   thurin revoke [<index>]
+  … --no-key --owner <address|ens>              sign here, publish from a wallet elsewhere: prints a
+                                                thurin.id/attest link that carries the signed claim
 
 ${bold('Options')}
   --network mainnet|sepolia|local   --rpc <url>   --account <name>   --password-file <path>
+  --site <url>   (where --no-key links point; default https://thurin.id)
   --json   --yes   --version   --help
 
 Exit codes: 0 ok · 1 a check failed · 2 usage · 3 chain or network error
@@ -49,9 +52,10 @@ async function main() {
       network: { type: 'string', short: 'n' }, rpc: { type: 'string' }, account: { type: 'string', short: 'a' }, 'password-file': { type: 'string' },
       key: { type: 'string', short: 'k' }, 'include-email': { type: 'boolean' }, replace: { type: 'boolean' }, import: { type: 'boolean' },
       name: { type: 'string' }, expires: { type: 'string' }, from: { type: 'string' }, 'private-key': { type: 'boolean' },
+      'no-key': { type: 'boolean' }, owner: { type: 'string' }, site: { type: 'string' },
     },
   })
-  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'] }
+  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'] }
   setJson(!!opts.json)
   if (opts.version) { process.stdout.write(version + '\n'); return }
   const [cmd, ...rest] = positionals

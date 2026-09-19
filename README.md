@@ -58,6 +58,16 @@ thurin revoke              # mark the claim inactive (it stays in chain history)
 
 Adding a proof to a key is one gpg line; see the [GnuPG guide](https://docs.thurin.id/#/guides/gnupg).
 
+## Your ETH is on a Ledger or a phone
+
+Then the CLI can't send the transaction, but it can still do the PGP half:
+
+```bash
+thurin attest --no-key --owner yourname.eth      # or --owner 0x…
+```
+
+It signs, exports, and runs every check, then prints a `thurin.id/attest#…` link instead of sending. Open that link where the wallet is, connect the address you named, and publish. The signed statement and key travel in the part of the link after `#`, which browsers never send to any server, so nothing passes through Thurin. `reattest` and `update-key` take `--no-key` too. No keystore, password, or ETH is needed on this machine.
+
 ## Keys
 
 ```bash
@@ -86,7 +96,7 @@ Keystores are the same format `cast`, geth, and every wallet import. `--password
 
 ## What's next
 
-`authorize` and `submit` (attest from an address that has never held ETH), `init` (one guided run), `keyserver` (an HKP server for gpg backed by the chain), and `--anon`. See the [roadmap](https://docs.thurin.id/#/roadmap).
+`authorize` and `submit` (attest from an address that has never held ETH, no browser at all), `init` (one guided run), `keyserver` (an HKP server for gpg backed by the chain), and `--anon`. See the [roadmap](https://docs.thurin.id/#/roadmap).
 
 ## Development
 

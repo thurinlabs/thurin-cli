@@ -8,6 +8,7 @@ export interface Config {
   rpc?: Partial<Record<NetworkName, string>>
   account?: string   // default keystore name
   key?: string       // default PGP fingerprint
+  site?: string      // where --no-key links point (default https://thurin.id)
 }
 
 export const CONFIG_DIR = process.env.THURIN_CONFIG_DIR || join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'thurin')
