@@ -82,6 +82,19 @@ The link opens on thurin.id/attest, where *any* wallet can publish it and pay th
 
 Know the edge: an address with no ETH can't recall a slip, so the deadline is your only safety. It is printed every time, and a slip can be used once.
 
+## Run a relayer
+
+A relayer is `thurin submit` behind an HTTP port: it accepts the same JSON a hand-off link carries, runs the same checks, and pays for the `…For` call from a hot keystore, within limits you set.
+
+```bash
+thurin wallet create hot                      # fund it with pocket money
+thurin relay --account hot --budget 0.01      # ETH per day; also --free-attests 1, --per-hour 10, --port 8787
+```
+
+Then `thurin attest --authorize --relayer https://relay.example` publishes without a link, and `"relayer"` in `~/.config/thurin/config.json` makes that the default (`--no-relayer` gets a link anyway). `GET /` reports the budget and what's been spent.
+
+This is the one command that spends unattended. It spends gas only, one transaction at a time, never more than the budget per rolling day, and refuses calls over 600k gas. Treat the key as pocket money: a drained relayer loses its budget, not anyone's identity. Put nginx or another TLS proxy in front; it listens on localhost by default and trusts `X-Forwarded-For` for rate limits.
+
 ## Keys
 
 ```bash
@@ -110,7 +123,7 @@ Keystores are the same format `cast`, geth, and every wallet import. `--password
 
 ## What's next
 
-the relayer (`--authorize` sends straight to a service that pays; anyone can run one), `init` (one guided run), `keyserver` (an HKP server for gpg backed by the chain), and `--anon`. See the [roadmap](https://docs.thurin.id/#/roadmap).
+`init` (one guided run), `keyserver` (an HKP server for gpg backed by the chain), and `--anon`, `init` (one guided run), `keyserver` (an HKP server for gpg backed by the chain), and `--anon`. See the [roadmap](https://docs.thurin.id/#/roadmap).
 
 ## Development
 

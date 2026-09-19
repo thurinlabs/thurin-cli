@@ -48,7 +48,7 @@ function summary(p: Awaited<ReturnType<typeof preflight>>) {
   return `${label('names')}${p.kept.join(', ')}${p.removed.length ? dim(`  (left out: ${p.removed.join(', ')})`) : ''}\n${label('proofs')}${p.proofs}\n${label('size')}${(p.bytes / 1024).toFixed(1)} KB`
 }
 
-async function send(ctx: ChainCtx, opts: Record<string, any>, functionName: string, args: unknown[], what: string) {
+export async function send(ctx: ChainCtx, opts: Record<string, any>, functionName: string, args: unknown[], what: string) {
   const account = await accountFor(opts)
   const { createWalletClient, http } = await import('viem')
   const wallet = createWalletClient({ account, chain: ctx.client.chain, transport: http(ctx.rpcUrl) })
@@ -148,23 +148,40 @@ async function authorize(ctx: ChainCtx, opts: Record<string, any>, op: HandoffOp
       `${head}${label('file')}${opts.out}\n${dim(`Publish with: thurin submit ${opts.out}`)}`)
     return
   }
+  const relayer: string | undefined = opts.noRelayer ? undefined : (opts.relayer || readConfig().relayer)
+  if (relayer) {
+    info(`Sending to ${relayer}…`)
+    const r = await postToRelayer(relayer, h)
+    out({ authorized: true, relayed: true, op, owner, fingerprint: fpr, network: ctx.network, index, nonce, ...r, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
+      `${ok('Published')} ${op}${index !== undefined ? ` #${index}` : ''} for ${owner} via ${relayer}\n${label('tx')}${txUrl(ctx, r.hash)}\n${label('identity')}${identityUrl(ctx, owner)}`)
+    return
+  }
   const url = handoffUrl(siteFor(opts), h)
   if (ctx.network !== 'mainnet' && !opts.site) info(`thurin.id runs mainnet; for ${ctx.network} open this on a ${ctx.network} build (--site http://localhost:5173).`)
   out({ authorized: true, op, owner, fingerprint: fpr, network: ctx.network, index, nonce, deadline, url }, () =>
     `${head}Open this link where a funded wallet is, or send it to whoever is paying:\n\n${url}\n`)
 }
 
-/** thurin submit <link|file|fragment>: publish someone else's authorization from this keystore. */
-export async function submit(args: string[], opts: Record<string, any>) {
-  if (!args[0]) throw new CliError('Usage: thurin submit <link | authorization.json>', EXIT.USAGE)
-  let h: Handoff
-  try { h = readHandoffInput(args[0]) } catch (e: any) { throw new CliError(e.message, EXIT.USAGE) }
+/** POST the authorization to a relayer (`thurin relay`); it runs the same checks and pays. */
+async function postToRelayer(url: string, h: Handoff): Promise<{ hash: string; block?: string; payer?: string }> {
+  let resp: Response
+  try { resp = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(h) }) }
+  catch (e: any) { throw new CliError(`Could not reach the relayer at ${url}: ${e.message}. Use --no-relayer to get a link instead.`, EXIT.CHAIN) }
+  const body: any = await resp.json().catch(() => ({}))
+  if (!resp.ok) throw new CliError(`The relayer refused (${resp.status}): ${body.error || resp.statusText}. Use --no-relayer to get a link instead.`, resp.status === 429 || resp.status === 503 ? EXIT.CHAIN : EXIT.FAILED)
+  if (!body.hash) throw new CliError(`The relayer answered without a transaction hash: ${JSON.stringify(body)}`, EXIT.CHAIN)
+  return body
+}
+
+/**
+ * Every check a submitter or relayer makes before paying for someone's authorization:
+ * the signature recovers to the owner, the nonce is the chain's, the deadline is ahead,
+ * the key is the key it names, and the PGP signature verifies the way a lookup will.
+ */
+export async function checkAuthorization(ctx: ChainCtx, h: Handoff) {
   if (!h.authorization) throw new CliError('This hand-off has no authorization; only its owner can publish it (open the link in a browser with that wallet)', EXIT.USAGE)
-  if (opts.network && opts.network !== h.network) throw new CliError(`This authorization is for ${h.network}, not ${opts.network}`, EXIT.USAGE)
-  const ctx = chainCtx({ ...opts, network: h.network })
   const owner = getAddress(h.owner)
   const a = h.authorization
-
   const typed = typedDataFor(h, ctx.client.chain!.id, ctx.registry)
   const signer = await recoverTypedDataAddress({ ...(typed as any), signature: a.signature }).catch(() => null)
   if (!signer || signer.toLowerCase() !== h.owner) throw new CliError(`The authorization was not signed by ${owner}${signer ? ` (it recovers to ${signer})` : ''}; something in it was changed`, EXIT.FAILED)
@@ -182,6 +199,18 @@ export async function submit(args: string[], opts: Record<string, any>) {
       if (!v.verified) throw new CliError(`The PGP signature does not verify: ${v.reason}`, EXIT.FAILED)
     }
   }
+  return { owner, names, proofs }
+}
+
+/** thurin submit <link|file|fragment>: publish someone else's authorization from this keystore. */
+export async function submit(args: string[], opts: Record<string, any>) {
+  if (!args[0]) throw new CliError('Usage: thurin submit <link | authorization.json>', EXIT.USAGE)
+  let h: Handoff
+  try { h = readHandoffInput(args[0]) } catch (e: any) { throw new CliError(e.message, EXIT.USAGE) }
+  if (opts.network && opts.network !== h.network) throw new CliError(`This authorization is for ${h.network}, not ${opts.network}`, EXIT.USAGE)
+  const ctx = chainCtx({ ...opts, network: h.network })
+  const { owner, names, proofs } = await checkAuthorization(ctx, h)
+  const a = h.authorization!
   if (!isJson()) process.stderr.write(
     `${label('for')}${owner}\n${label('op')}${h.op}${h.index !== undefined ? ` #${h.index}` : ''}\n` +
     (h.key ? `${label('key')}${h.fingerprint}\n${label('names')}${names.join(', ')}\n${label('proofs')}${proofs}\n` : '') +

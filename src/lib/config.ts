@@ -9,6 +9,7 @@ export interface Config {
   account?: string   // default keystore name
   key?: string       // default PGP fingerprint
   site?: string      // where --no-key links point (default https://thurin.id)
+  relayer?: string   // where --authorize posts instead of printing a link (none by default)
 }
 
 export const CONFIG_DIR = process.env.THURIN_CONFIG_DIR || join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'thurin')

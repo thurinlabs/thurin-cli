@@ -4,6 +4,7 @@ import { status } from './commands/status.js'
 import { key } from './commands/key.js'
 import { wallet } from './commands/wallet.js'
 import { attest, updateKey, reattest, revoke, submit } from './commands/attest.js'
+import { relay } from './commands/relay.js'
 import { setJson, CliError, EXIT, bold, dim } from './lib/output.js'
 
 const { version } = createRequire(import.meta.url)('../package.json') as { version: string }
@@ -35,7 +36,11 @@ ${bold('Claims')} (each runs every check before spending gas)
                                                 thurin.id/attest link that carries the signed claim
   … --authorize [--deadline 7d] [--out f.json]  no ETH here: the keystore signs a permission slip
                                                 (free) that anyone can publish and pay for
+      [--relayer <url> | --no-relayer]          post it to a relayer that pays, instead of a link
   thurin submit <link|file>                     publish someone's authorization from this keystore
+
+${bold('Run a relayer')} (the one command that spends: gas only, within a budget, from a hot key)
+  thurin relay --account <hot> [--budget 0.01] [--port 8787] [--free-attests 1] [--per-hour 10]
 
 ${bold('Options')}
   --network mainnet|sepolia|local   --rpc <url>   --account <name>   --password-file <path>
@@ -57,9 +62,11 @@ async function main() {
       name: { type: 'string' }, expires: { type: 'string' }, from: { type: 'string' }, 'private-key': { type: 'boolean' },
       'no-key': { type: 'boolean' }, owner: { type: 'string' }, site: { type: 'string' },
       authorize: { type: 'boolean' }, deadline: { type: 'string' }, out: { type: 'string' },
+      relayer: { type: 'string' }, 'no-relayer': { type: 'boolean' },
+      budget: { type: 'string' }, port: { type: 'string' }, host: { type: 'string' }, 'per-hour': { type: 'string' }, 'free-attests': { type: 'string' },
     },
   })
-  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'] }
+  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'], noRelayer: values['no-relayer'], perHour: values['per-hour'], freeAttests: values['free-attests'] }
   setJson(!!opts.json)
   if (opts.version) { process.stdout.write(version + '\n'); return }
   const [cmd, ...rest] = positionals
@@ -74,6 +81,7 @@ async function main() {
     case 'reattest': return reattest(rest, opts)
     case 'revoke': return revoke(rest, opts)
     case 'submit': return submit(rest, opts)
+    case 'relay': return relay(rest, opts)
     default: throw new CliError(`Unknown command "${cmd}". Try: thurin --help`, EXIT.USAGE)
   }
 }
