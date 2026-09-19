@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createRequire } from 'node:module'
 import type { Address } from 'viem'
 import { chainCtx, claimsOf, resolveOwners, detectLookup, ensNameOf, type ChainCtx, type Claim } from '../lib/chain.js'
 import { CliError, EXIT, ok, bold, dim, label } from '../lib/output.js'
@@ -14,7 +15,7 @@ import { CliError, EXIT, ok, bold, dim, label } from '../lib/output.js'
  * it asked for, so even a hostile server can only withhold, never substitute.
  */
 
-const VERSION = process.env.npm_package_version || '0'
+const VERSION: string = (() => { try { return createRequire(import.meta.url)('../package.json').version } catch { return process.env.npm_package_version || '0' } })()
 
 export async function keyserver(_args: string[], opts: Record<string, any>) {
   const ctx = chainCtx(opts)
