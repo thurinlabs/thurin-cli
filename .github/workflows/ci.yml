@@ -1,0 +1,22 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: thurin-cli }
+      # The CLI resolves identity-kit from a sibling checkout (file:../identity-kit).
+      - uses: actions/checkout@v4
+        with: { repository: thurinlabs/identity-kit, path: identity-kit }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci && npm run build
+        working-directory: identity-kit
+      - run: npm ci
+        working-directory: thurin-cli
+      - run: npm run typecheck && npm run build && npm test
+        working-directory: thurin-cli
+      - name: Smoke (gpg present on the runner)
+        working-directory: thurin-cli
+        run: node dist/thurin.js --help > /dev/null && node dist/thurin.js key list --json > /dev/null

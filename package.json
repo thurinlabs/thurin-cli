@@ -1,0 +1,48 @@
+{
+  "name": "@thurinlabs/thurin",
+  "version": "0.1.0",
+  "description": "Thurin from a terminal: look up, attest, update, and revoke on-chain PGP identities. Never a wallet; never holds a PGP secret.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "thurin": "./dist/thurin.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/thurin.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "node -e \"const d=require('./package.json'); if (d.dependencies['@thurinlabs/identity-kit'].startsWith('file:')) { console.error('Refusing to publish with identity-kit linked from a path; set it to a published version (^1.1.0)'); process.exit(1) }\" && npm run typecheck && npm run build && npm test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thurinlabs/thurin-cli"
+  },
+  "homepage": "https://docs.thurin.id",
+  "bugs": {
+    "url": "https://github.com/thurinlabs/thurin-cli/issues"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^1.2.1",
+    "@noble/hashes": "^1.7.1",
+    "@scure/bip39": "^1.5.4",
+    "@thurinlabs/identity-kit": "file:../identity-kit",
+    "picocolors": "^1.1.1",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
