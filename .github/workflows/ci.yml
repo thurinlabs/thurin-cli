@@ -5,20 +5,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { path: thurin-cli }
-      # The CLI resolves identity-kit from a sibling checkout (file:../identity-kit).
-      # `ref` follows the kit branch the CLI needs; once the dependency is a published
-      # version (^1.1.0) this checkout and the build step below go away.
-      - uses: actions/checkout@v4
-        with: { repository: thurinlabs/identity-kit, path: identity-kit, ref: core-entry }
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: npm ci && npm run build
-        working-directory: identity-kit
       - run: npm ci
-        working-directory: thurin-cli
       - run: npm run typecheck && npm run build && npm test
-        working-directory: thurin-cli
       - name: Smoke (gpg present on the runner)
-        working-directory: thurin-cli
         run: node dist/thurin.js --help > /dev/null && node dist/thurin.js key list --json > /dev/null
