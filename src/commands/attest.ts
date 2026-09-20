@@ -7,6 +7,7 @@ import {
 import { chainCtx, claimsOf, type ChainCtx } from '../lib/chain.js'
 import { findKey, clearsign, exportMinimal, attestStatement } from '../lib/gpg.js'
 import { loadAccount } from '../lib/keystore.js'
+import { accountSigner, commandSigner, fileSigner, providedSigner, readSignatureFile, readSignOut, SignLater, type Signer } from '../lib/signer.js'
 import { prompt, confirm } from '../lib/prompt.js'
 import { readConfig } from '../lib/config.js'
 import { out, info, ok, bad, dim, bold, label, isJson, CliError, EXIT } from '../lib/output.js'
@@ -68,10 +69,10 @@ function txUrl(ctx: ChainCtx, hash: string) { return ctx.explorerUrl ? `${ctx.ex
 
 export async function ownerFor(ctx: ChainCtx, opts: Record<string, any>): Promise<Address> {
   if (opts.noKey && opts.authorize) throw new CliError('--no-key and --authorize are different exits: --no-key when your ETH wallet is elsewhere, --authorize when the keystore here has no ETH', EXIT.USAGE)
-  if (opts.noKey) {
-    // Hand-off: the wallet that will publish lives elsewhere, so the address is given, not derived.
+  if (opts.noKey || externalSigner(opts)) {
+    // Hand-off, or an external signer: the key lives elsewhere, so the address is given, not derived.
     const given: string = opts.owner || ''
-    if (!given) throw new CliError('--no-key needs --owner <address|ens>: the wallet that will publish the claim', EXIT.USAGE)
+    if (!given) throw new CliError(`${opts.noKey ? '--no-key' : '--signer / --sign-out / --signature'} needs --owner <address|ens>: the address the claim is for`, EXIT.USAGE)
     if (isAddress(given)) return getAddress(given)
     if (!given.endsWith('.eth')) throw new CliError(`--owner must be an address or an ENS name, not "${given}"`, EXIT.USAGE)
     const resolved = await ctx.client.getEnsAddress({ name: normalize(given) }).catch((e: any) => { throw new CliError(`ENS lookup failed for ${given}: ${e.shortMessage || e.message}`, EXIT.CHAIN) })
@@ -81,6 +82,43 @@ export async function ownerFor(ctx: ChainCtx, opts: Record<string, any>): Promis
   }
   // The address the claim is published from = the paying (or, with --authorize, signing) account.
   return (await accountFor(opts)).address
+}
+
+function externalSigner(opts: Record<string, any>): boolean { return !!(opts.signer || opts.signOut || opts.signature || opts.signatureFile || opts.signIn) }
+
+/**
+ * Who signs an EIP-712 authorization. Thurin builds the typed data and hands it over; the
+ * recovery and simulation checks afterwards are the same whoever signed.
+ */
+async function signerFor(opts: Record<string, any>, handoff: unknown): Promise<Signer> {
+  const n = [opts.signer, opts.signOut, opts.signature, opts.signatureFile].filter(Boolean).length
+  if (n > 1) throw new CliError('Pick one of --signer, --sign-out, --signature, --signature-file', EXIT.USAGE)
+  if (opts.signer) return commandSigner(opts.signer)
+  if (opts.signOut) return fileSigner(opts.signOut, handoff)
+  if (opts.signature) return providedSigner(opts.signature)
+  if (opts.signatureFile) return providedSigner(readSignatureFile(opts.signatureFile))
+  return accountSigner(await accountFor(opts))
+}
+
+/**
+ * thurin authorize finish <sign-out file> --signature 0x… | --signature-file f
+ * The second half of the air gap: the typed data and hand-off come from the file --sign-out
+ * wrote (same PGP bytes, same nonce, same deadline), only the signature is new.
+ */
+export async function finishAuthorization(args: string[], opts: Record<string, any>) {
+  if (!args[0]) throw new CliError('Usage: thurin authorize finish <sign-out.json> (--signature 0x… | --signature-file f)', EXIT.USAGE)
+  if (!opts.signature && !opts.signatureFile) throw new CliError('Give the signature: --signature 0x… or --signature-file f', EXIT.USAGE)
+  const { typedData, handoff: h } = readSignOut(args[0])
+  const ctx = chainCtx({ ...opts, network: h.network })
+  const owner = getAddress(h.owner)
+  h.authorization.signature = opts.signature ? await providedSigner(opts.signature).signTypedData(typedData) : readSignatureFile(opts.signatureFile)
+  const recovered = await recoverTypedDataAddress({ ...(typedData as any), signature: h.authorization.signature })
+  if (recovered.toLowerCase() !== owner.toLowerCase()) throw new CliError(`The signature recovers to ${recovered}, not ${owner}; refusing to hand it out`, EXIT.FAILED)
+  const nonce = Number(await ctx.client.readContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: 'nonces', args: [owner] } as any))
+  if (nonce !== h.authorization.nonce) throw new CliError(`The file was made at nonce ${h.authorization.nonce}; the chain is at ${nonce}. Start over with --sign-out.`, EXIT.FAILED)
+  await ctx.client.simulateContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: FOR_FN[h.op as HandoffOp], args: forArgsOf(h), account: owner } as any)
+    .catch((e: any) => { throw new CliError(`The registry would reject this authorization: ${e.shortMessage || e.message}`, EXIT.CHAIN) })
+  await emitAuthorized(ctx, opts, h, owner)
 }
 
 /** The keystore is unlocked once per run; the address is needed early and the key later. */
@@ -125,22 +163,44 @@ export function handoff(ctx: ChainCtx, opts: Record<string, any>, op: HandoffOp,
  * so the deadline is shown every time.
  */
 export async function authorize(ctx: ChainCtx, opts: Record<string, any>, op: HandoffOp, owner: Address, fpr: string, p: Preflight | null, index?: number) {
-  const account = await accountFor(opts)
-  if (account.address.toLowerCase() !== owner.toLowerCase()) throw new CliError(`--authorize signs with the keystore's own address (${account.address}); it cannot authorize for ${owner}`, EXIT.USAGE)
+  const h0 = buildHandoff(ctx, opts, op, owner, fpr, p, index)
+  const signer = await signerFor(opts, h0)
+  if (!externalSigner(opts)) {
+    const account = await accountFor(opts)
+    if (account.address.toLowerCase() !== owner.toLowerCase()) throw new CliError(`--authorize signs with the keystore's own address (${account.address}); it cannot authorize for ${owner}`, EXIT.USAGE)
+  }
   const nonce = Number(await ctx.client.readContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: 'nonces', args: [owner] } as any))
   let deadline: number
   try { deadline = parseDeadline(opts.deadline) } catch (e: any) { throw new CliError(e.message, EXIT.USAGE) }
-  const h = buildHandoff(ctx, opts, op, owner, fpr, p, index)
+  const h = h0
   h.authorization = { nonce, deadline, signature: '0x' }
   const typed = typedDataFor(h, ctx.client.chain!.id, ctx.registry)
-  h.authorization.signature = await account.signTypedData(typed as any)
-  // Prove it back before handing it out.
-  const signer = await recoverTypedDataAddress({ ...(typed as any), signature: h.authorization.signature })
-  if (signer.toLowerCase() !== owner.toLowerCase()) throw new CliError('Signed authorization does not recover to the owner; refusing to hand it out', EXIT.FAILED)
+  if (externalSigner(opts)) info(`Signing with ${signer.describe}`)
+  try { h.authorization.signature = await signer.signTypedData(typed) }
+  catch (e) {
+    if (e instanceof SignLater) {
+      out({ signLater: true, op, owner, nonce, deadline, typedData: e.path }, () =>
+        `${ok('Typed data written')} to ${e.path} (nonce ${nonce}, deadline ${describeDeadline(deadline)}).\n` +
+        `Sign the typedData in it with the key for ${owner}, then: thurin authorize finish ${e.path} --signature <0x…> (or --signature-file f)\n` +
+        `${dim('The nonce and deadline are inside the file; sign before the deadline and before the address publishes anything else.')}`)
+      return
+    }
+    throw e
+  }
+  // Prove it back before handing it out — whoever signed, this is the check that matters.
+  const recovered = await recoverTypedDataAddress({ ...(typed as any), signature: h.authorization.signature })
+  if (recovered.toLowerCase() !== owner.toLowerCase()) throw new CliError(`The signature recovers to ${recovered}, not ${owner}; refusing to hand it out`, EXIT.FAILED)
   // Would the registry take it right now? (nonce, index, duplicate-claim rules; simulated from the owner, which needs no ETH)
   await ctx.client.simulateContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: FOR_FN[op], args: forArgsOf(h), account: owner } as any)
     .catch((e: any) => { throw new CliError(`The registry would reject this authorization: ${e.shortMessage || e.message}`, EXIT.CHAIN) })
 
+  await emitAuthorized(ctx, opts, h, owner)
+}
+
+/** Hand out a signed authorization: to a relayer, a file, or a link. Shared by --authorize and `authorize finish`. */
+async function emitAuthorized(ctx: ChainCtx, opts: Record<string, any>, h: Handoff, owner: Address) {
+  const { op, index, nonce, deadline } = { op: h.op, index: h.index, nonce: h.authorization!.nonce, deadline: h.authorization!.deadline }
+  const fpr = h.fingerprint
   const where = describeDeadline(deadline)
   const head = `${ok('Authorized')} ${op}${index !== undefined ? ` #${index}` : ''} from ${owner} (nonce ${nonce}). Anyone can publish it for ${where}.\nIt can't be recalled before then; after then it does nothing.\n`
   if (opts.out) {

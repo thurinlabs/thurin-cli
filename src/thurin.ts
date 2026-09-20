@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import { status } from './commands/status.js'
 import { key } from './commands/key.js'
 import { wallet } from './commands/wallet.js'
-import { attest, updateKey, reattest, revoke, submit } from './commands/attest.js'
+import { attest, updateKey, reattest, revoke, submit, finishAuthorization } from './commands/attest.js'
 import { relay } from './commands/relay.js'
 import { keyserver } from './commands/keyserver.js'
 import { record } from './commands/record.js'
@@ -39,6 +39,10 @@ ${bold('Claims')} (each runs every check before spending gas)
   … --authorize [--deadline 7d] [--out f.json]  no ETH here: the keystore signs a permission slip
                                                 (free) that anyone can publish and pay for
       [--relayer <url> | --no-relayer]          post it to a relayer that pays, instead of a link
+      [--signer <cmd>]                          sign the slip with a program (a card): typed data on its
+                                                stdin, signature on its stdout. Needs --owner
+      [--sign-out f.json]                       air gap: write what needs signing and stop, then
+  thurin authorize finish f.json --signature 0x…   (or --signature-file) to check and hand it out
   thurin submit <link|file>                     publish someone's authorization from this keystore
 
 ${bold('Records')} (small values on your claim; the chain names what you put out)
@@ -73,11 +77,12 @@ async function main() {
       name: { type: 'string' }, expires: { type: 'string' }, from: { type: 'string' }, 'private-key': { type: 'boolean' },
       'no-key': { type: 'boolean' }, owner: { type: 'string' }, site: { type: 'string' },
       authorize: { type: 'boolean' }, deadline: { type: 'string' }, out: { type: 'string' },
+      signer: { type: 'string' }, 'sign-out': { type: 'string' }, signature: { type: 'string' }, 'signature-file': { type: 'string' },
       relayer: { type: 'string' }, 'no-relayer': { type: 'boolean' },
       budget: { type: 'string' }, port: { type: 'string' }, host: { type: 'string' }, 'cache-seconds': { type: 'string' }, file: { type: 'string' }, index: { type: 'string' }, url: { type: 'string' }, 'per-hour': { type: 'string' }, 'free-attests': { type: 'string' }, 'max-gas': { type: 'string' },
     },
   })
-  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'], noRelayer: values['no-relayer'], perHour: values['per-hour'], freeAttests: values['free-attests'], maxGas: values['max-gas'], cacheSeconds: values['cache-seconds'] }
+  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'], noRelayer: values['no-relayer'], perHour: values['per-hour'], freeAttests: values['free-attests'], maxGas: values['max-gas'], cacheSeconds: values['cache-seconds'], signOut: values['sign-out'], signatureFile: values['signature-file'] }
   setJson(!!opts.json)
   if (opts.version) { process.stdout.write(version + '\n'); return }
   const [cmd, ...rest] = positionals
@@ -92,6 +97,7 @@ async function main() {
     case 'reattest': return reattest(rest, opts)
     case 'revoke': return revoke(rest, opts)
     case 'submit': return submit(rest, opts)
+    case 'authorize': if (rest[0] === 'finish') return finishAuthorization(rest.slice(1), opts); throw new CliError('Usage: thurin authorize finish <sign-out.json> --signature 0x…', EXIT.USAGE)
     case 'relay': return relay(rest, opts)
     case 'keyserver': return keyserver(rest, opts)
     case 'record': return record(rest, opts)

@@ -82,6 +82,22 @@ The link opens on thurin.id/attest, where *any* wallet can publish it and pay th
 
 Know the edge: an address with no ETH can't recall a slip, so the deadline is your only safety. It is printed every time, and a slip can be used once.
 
+## Sign the slip somewhere else
+
+`--authorize` has one seam: the EIP-712 signature. Thurin builds the typed data, hands it to a signer, gets 65 bytes back, and then runs its own recovery and simulation checks whoever signed. The keystore is one signer. To keep the Ethereum key on a card or an air-gapped machine, use another; Thurin learns nothing about the hardware. All three need `--owner`, since there is no keystore to derive the address from.
+
+```bash
+# a program: typed data as JSON on stdin, signature (hex, or JSON with a "signature" field) on stdout
+thurin attest --authorize --owner you.eth --signer "keycard-sign --slot 1"
+
+# a true air gap, two steps
+thurin attest --authorize --owner you.eth --sign-out slip.json   # runs every check, writes what needs signing, stops
+#   … sign the "typedData" in slip.json anywhere; only that object needs to cross the gap …
+thurin authorize finish slip.json --signature-file sig.txt       # or --signature 0x…; recovery, nonce, and simulation checks, then the link
+```
+
+The typed data is standard EIP-712 (`domain`, `types`, `primaryType`, `message`; numbers as decimal strings), so any wallet, HSM, or card tool that signs typed data can be the signer. `slip.json` also carries the unsigned hand-off, because the PGP signature inside it has a timestamp: the finishing step must reuse those exact bytes, not sign again. A signature that recovers to anyone but `--owner` is refused before it goes anywhere, and a slip made at an older nonce is refused too.
+
 ## Records: the chain names what you put out
 
 A record is a small value on your claim, set only by you, readable by anyone. The first kind is `thurin.pointer`: the releases you have put out, each named by the sha256 of its checksum file.
@@ -108,7 +124,7 @@ Make it the default and everything built on gpg follows: `--refresh-keys` picks 
 echo "keyserver hkp://127.0.0.1:11371" >> ~/.gnupg/dirmngr.conf && gpgconf --kill dirmngr
 ```
 
-Search by fingerprint, key ID, address, or ENS name. Email search returns nothing, on purpose. There is no upload: keys are published by attesting, so nobody can attach anything to yours. A fetch by full fingerprint is self-authenticating, gpg checks the key hashes to what it asked for, so a keyserver can withhold but never substitute. Thurin runs one at `hkps://keys.thurin.id` for people without the CLI; the local one is the real thing.
+Search by fingerprint, key ID, address, or ENS name. Email search returns nothing, on purpose. There is no upload: keys are published by attesting, so nobody can attach anything to yours. A fetch by full fingerprint is self-authenticating, gpg checks the key hashes to what it asked for, so a keyserver can withhold but never substitute. Thurin runs one at `hkps://keys.thurin.id` for people without the CLI (write the scheme; a bare hostname means plain HKP on port 11371 to gpg); the local one is the real thing.
 
 ## Run a relayer
 
