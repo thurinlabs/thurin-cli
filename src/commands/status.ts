@@ -1,6 +1,7 @@
 import { identifyProof, verifyProof, displayUrl, fetchEFPGraph, type ProofResult } from '@thurinlabs/identity-kit/core'
 import { chainCtx, claimsOf, detectLookup, resolveOwners, ensNameOf, type Claim } from '../lib/chain.js'
 import { out, ok, bad, dim, bold, label, CliError, EXIT } from '../lib/output.js'
+import { ensHintOf, renderHint } from './ens.js'
 
 export async function status(args: string[], opts: Record<string, any>) {
   const query = args[0]
@@ -24,7 +25,9 @@ export async function status(args: string[], opts: Record<string, any>) {
       proofs = await Promise.all(ps.map(async p => { const r = await verifyProof(p, current.fingerprint, process.env.NEYNAR_API_KEY); return { provider: p.provider, label: p.label, display: displayUrl(p), url: p.url, verified: r.verified, reason: r.reason } }))
     }
     const efp = ctx.network === 'mainnet' ? await fetchEFPGraph(owner).catch(() => null) : null
-    identities.push({ address: owner, ensName: name, network: ctx.network, claims, current, proofs, efp })
+    // The name's id.thurin record: a pointer ENS viewers can show; the claim above is the proof.
+    const ensRecord = name && ctx.network === 'mainnet' ? await ensHintOf(ctx, name, claims).catch(() => null) : null
+    identities.push({ address: owner, ensName: name, network: ctx.network, claims, current, proofs, efp, ensRecord })
   }
 
   out({ query, lookup, identities: identities.map(i => ({ ...i, claims: i.claims.map(stripKey), current: i.current ? stripKey(i.current) : null })) }, () => identities.map(render).join('\n\n'))
@@ -51,6 +54,7 @@ function render(i: any): string {
   if (i.proofs.length) { L.push(label('proofs')); for (const p of i.proofs) L.push(`  ${p.verified ? ok('✓') : bad('✗')} ${p.label.padEnd(10)} ${p.display}${p.verified ? '' : dim('  ' + (p.reason || ''))}`) }
   else if (i.current) L.push(`${label('proofs')}${dim('none')}`)
   if (i.efp?.hasEfp) L.push(`${label('efp')}${i.efp.followers} followers · ${i.efp.following} following`)
+  if (i.ensRecord && (i.current || i.ensRecord.state !== 'unset')) L.push(`${label('ens record')}${renderHint(i.ensRecord, i.ensRecord.state === 'unset' && i.current ? i.ensName : undefined)}`)
   if (i.claims.length > 1 || (i.claims[0] && i.claims[0] !== i.current)) {
     L.push(label('history'))
     for (const c of i.claims) L.push(`  #${c.index} ${c.fingerprint.slice(0, 8)}…${c.fingerprint.slice(-8)} ${new Date(c.createdAt * 1000).toISOString().slice(0, 10)} ${c.revokedAt ? dim('revoked') : 'active'} ${c.verification?.verified ? ok('verified') : bad('unverified')}`)

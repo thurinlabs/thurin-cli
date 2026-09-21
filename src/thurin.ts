@@ -7,6 +7,7 @@ import { attest, updateKey, reattest, revoke, submit, finishAuthorization } from
 import { relay } from './commands/relay.js'
 import { keyserver } from './commands/keyserver.js'
 import { record } from './commands/record.js'
+import { ens } from './commands/ens.js'
 import { setJson, CliError, EXIT, bold, dim } from './lib/output.js'
 
 const { version } = createRequire(import.meta.url)('../package.json') as { version: string }
@@ -50,6 +51,10 @@ ${bold('Records')} (small values on your claim; the chain names what you put out
   thurin record add-release <name> <SHA256SUMS> [--url u]   name a release on-chain by its checksum file
   thurin record set <kind> <value|--file f> | clear <kind>
 
+  thurin ens check <name>                       does the name's id.thurin record point at its claim?
+  thurin ens link <name> [--key <fpr>]          set it from the keystore; --calldata prints the tx for
+                                                the wallet that manages the name instead
+
 ${bold('Be a keyserver')} (gpg reads keys from Ethereum; no upload, no database)
   thurin keyserver [--port 11371] [--host 127.0.0.1] [--cache-seconds 60]
   then: gpg --keyserver hkp://127.0.0.1:11371 --recv-keys <fingerprint>
@@ -73,7 +78,7 @@ async function main() {
     options: {
       json: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
       network: { type: 'string', short: 'n' }, rpc: { type: 'string' }, account: { type: 'string', short: 'a' }, 'password-file': { type: 'string' },
-      key: { type: 'string', short: 'k' }, 'include-email': { type: 'boolean' }, replace: { type: 'boolean' }, import: { type: 'boolean' },
+      key: { type: 'string', short: 'k' }, calldata: { type: 'boolean' }, 'include-email': { type: 'boolean' }, replace: { type: 'boolean' }, import: { type: 'boolean' },
       name: { type: 'string' }, expires: { type: 'string' }, from: { type: 'string' }, 'private-key': { type: 'boolean' },
       'no-key': { type: 'boolean' }, owner: { type: 'string' }, site: { type: 'string' },
       authorize: { type: 'boolean' }, deadline: { type: 'string' }, out: { type: 'string' },
@@ -101,6 +106,7 @@ async function main() {
     case 'relay': return relay(rest, opts)
     case 'keyserver': return keyserver(rest, opts)
     case 'record': return record(rest, opts)
+    case 'ens': return ens(rest, opts)
     default: throw new CliError(`Unknown command "${cmd}". Try: thurin --help`, EXIT.USAGE)
   }
 }

@@ -49,15 +49,16 @@ function summary(p: Awaited<ReturnType<typeof preflight>>) {
   return `${label('names')}${p.kept.join(', ')}${p.removed.length ? dim(`  (left out: ${p.removed.join(', ')})`) : ''}\n${label('proofs')}${p.proofs}\n${label('size')}${(p.bytes / 1024).toFixed(1)} KB`
 }
 
-export async function send(ctx: ChainCtx, opts: Record<string, any>, functionName: string, args: unknown[], what: string) {
+export async function send(ctx: ChainCtx, opts: Record<string, any>, functionName: string, args: unknown[], what: string, target?: { address: Address; abi: unknown }) {
   const account = await accountFor(opts)
+  const to = target ?? { address: ctx.registry, abi: REGISTRY_ABI }   // the registry unless a caller names another contract (ens link writes a resolver)
   const { createWalletClient, http } = await import('viem')
   const wallet = createWalletClient({ account, chain: ctx.client.chain, transport: http(ctx.rpcUrl) })
-  const gas = await ctx.client.estimateContractGas({ address: ctx.registry, abi: REGISTRY_ABI, functionName, args, account } as any).catch((e: any) => { throw new CliError(`${what} would revert: ${e.shortMessage || e.message}`, EXIT.CHAIN) })
+  const gas = await ctx.client.estimateContractGas({ address: to.address, abi: to.abi, functionName, args, account } as any).catch((e: any) => { throw new CliError(`${what} would revert: ${e.shortMessage || e.message}`, EXIT.CHAIN) })
   const price = await ctx.client.getGasPrice()
   const eth = Number(gas * price) / 1e18
   if (!opts.yes && !isJson() && !(await confirm(`${what} from ${account.address} on ${ctx.network} (~${gas} gas, ~${eth.toFixed(6)} ETH). Send?`))) throw new CliError('Cancelled', EXIT.USAGE)
-  const hash = await wallet.writeContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName, args, account, chain: ctx.client.chain } as any)
+  const hash = await wallet.writeContract({ address: to.address, abi: to.abi, functionName, args, account, chain: ctx.client.chain } as any)
   info(`Sent ${hash}. Waiting for confirmation…`)
   const receipt = await ctx.client.waitForTransactionReceipt({ hash })
   if (receipt.status !== 'success') throw new CliError(`Transaction reverted: ${hash}`, EXIT.CHAIN)

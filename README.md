@@ -109,6 +109,16 @@ thurin record get thurinlabs.eth pointer
 
 With that, a signed release is not just one your key signed but one your identity named on-chain: a stolen key can still sign a tarball, but it cannot make the chain name it without a transaction from your address. `record set <kind> <value|--file f>` and `record clear <kind>` handle any kind; values are capped at 1 KB and the pointer record drops its oldest entries when full (they stay in chain history).
 
+## Point your ENS name at your claim
+
+```bash
+thurin ens check ben.thurinlabs.eth            # matches, not set, or points elsewhere (exit 1 unless it matches)
+thurin ens link ben.thurinlabs.eth             # set the id.thurin record from the keystore
+thurin ens link ben.thurinlabs.eth --calldata  # print the transaction for the wallet that manages the name
+```
+
+`id.thurin` is an ENS text record holding the fingerprint the name's address claims. It is a pointer for ENS viewers; the claim is the proof. `status <name>` shows it. Guide: [docs.thurin.id/#/guides/ens-record](https://docs.thurin.id/#/guides/ens-record).
+
 ## Be a keyserver
 
 gpg has asked keyservers for keys the same way since the 1990s. `thurin keyserver` answers that question by reading the registry, so plain gpg pulls keys from Ethereum without knowing it:
