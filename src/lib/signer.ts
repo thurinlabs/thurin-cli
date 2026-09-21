@@ -37,6 +37,9 @@ export function commandSigner(command: string): Signer {
         if (code !== 0) return reject(new CliError(`Signer exited with code ${code}`, EXIT.FAILED))
         try { resolve(parseSignature(out)) } catch (e) { reject(e) }
       })
+      // A signer that exits without reading its input (a wrong command, a card that refused) closes
+      // the pipe before the write lands: EPIPE here is noise, 'close' below reports what happened.
+      child.stdin.on('error', () => {})
       child.stdin.end(JSON.stringify(typed, bigintReplacer) + '\n')
     }),
   }
