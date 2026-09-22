@@ -123,6 +123,8 @@ thurin ens link ben.thurinlabs.eth --calldata  # print the transaction for the w
 
 gpg has asked keyservers for keys the same way since the 1990s. `thurin keyserver` answers that question by reading the registry, so plain gpg pulls keys from Ethereum without knowing it:
 
+In a browser it looks like a keyserver always did: a search box and the `pub` / `uid` listing, with one extra line, who claims the key on-chain. gpg still gets the machine-readable index.
+
 ```bash
 thurin keyserver                          # hkp://127.0.0.1:11371
 gpg --keyserver hkp://127.0.0.1:11371 --recv-keys 08B9374FDFBEC67EFFA24E669D3D86E35361EF7B

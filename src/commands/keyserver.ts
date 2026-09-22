@@ -45,6 +45,8 @@ export async function keyserver(_args: string[], opts: Record<string, any>) {
       log(req, 'add refused')
       return text(res, 405, 'This keyserver has no upload. Keys are published by their owner attesting at https://thurin.id/attest or with `thurin attest`.')
     }
+    const browser = /text\/html/.test(req.headers.accept || '')
+    if (url.pathname === '/' && browser) return html(res, 200, frontDoor(req, ctx))
     if (url.pathname === '/' || url.pathname === '/health') return text(res, 200, `thurin keyserver ${VERSION} · ${ctx.network} · HKP over the Thurin registry. GET /pks/lookup?op=get&search=0x<fingerprint>`)
     if (url.pathname !== '/pks/lookup' || req.method !== 'GET') return text(res, 404, 'not found')
     const op = url.searchParams.get('op') || 'get'
@@ -52,26 +54,35 @@ export async function keyserver(_args: string[], opts: Record<string, any>) {
     if (!search) return text(res, 400, 'search parameter required')
     if (op !== 'get' && op !== 'index' && op !== 'vindex') return text(res, 501, `op=${op} not supported`)
 
+    // gpg sends options=mr and Accept: */*; a person arrives from the form with Accept: text/html.
+    const human = browser && op !== 'get' && !/\bmr\b/.test(url.searchParams.get('options') || '')
+    const miss = (msg: string) => human ? html(res, 404, frontDoor(req, ctx, '', msg === 'No key found' ? `No key found for ${search}.` : `No key for ${search}. ${msg}.`)) : text(res, 404, msg)
     let entries: Entry[]
     try { entries = await lookup(search) }
     catch (e: any) {
-      if (e instanceof CliError && e.code === EXIT.USAGE) { log(req, `refused: ${e.message}`); return text(res, 404, e.message) }   // an email or a word: nothing to find by design
-      if (e instanceof CliError && e.code === EXIT.FAILED) { log(req, 'not found'); return text(res, 404, 'No key found') }
+      if (e instanceof CliError && e.code === EXIT.USAGE) { log(req, `refused: ${e.message}`); return miss(e.message) }   // an email or a word: nothing to find by design
+      if (e instanceof CliError && e.code === EXIT.FAILED) { log(req, 'not found'); return miss('No key found') }
       throw e
     }
-    if (!entries.length) { log(req, 'not found'); return text(res, 404, 'No key found') }
+    if (!entries.length) { log(req, 'not found'); return miss('No key found') }
     log(req, `${op} ${entries.length} key(s)`)
     if (op === 'get') {
       const body = entries.map(e => e.armored).join('\n')
       // gpg gets the keyserver media type. A browser (Accept: text/html) gets the same bytes
       // shown as text instead of a download; anything else downloads under a sensible name.
-      const browser = /text\/html/.test(req.headers.accept || '')
       const name = `${entries.map(e => e.fingerprint).join('+')}.asc`
       res.writeHead(200, browser
         ? { 'content-type': 'text/plain; charset=utf-8', 'cache-control': `max-age=${ttl / 1000}` }
         : { 'content-type': 'application/pgp-keys', 'content-disposition': `inline; filename="${name}"`, 'cache-control': `max-age=${ttl / 1000}` })
       res.end(body)
       return
+    }
+    if (human) {
+      // The primary name if the address set one; else the name that was searched, which resolved here.
+      const searchedName = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(search) ? search.toLowerCase() : null
+      const names = new Map<string, string | null>()
+      for (const e of entries) if (!names.has(e.owner)) names.set(e.owner, (await ensNameOf(ctx, e.owner)) ?? searchedName)
+      return html(res, 200, frontDoor(req, ctx, search, undefined, indexListing(entries, names)))
     }
     // Machine-readable index (options=mr), the form dirmngr parses.
     const lines = [`info:1:${entries.length}`]
@@ -149,6 +160,104 @@ function toEntry(c: Claim, owner: Address): Entry {
 function text(res: ServerResponse, status: number, body: string) {
   res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8' })
   res.end(body + '\n')
+}
+
+function html(res: ServerResponse, status: number, body: string) {
+  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8' })
+  res.end(body)
+}
+
+const ALGO_NAME: Record<number, string> = { 1: 'rsa', 16: 'elg', 17: 'dsa', 18: 'ecdh', 19: 'ecdsa', 22: 'ed25519' }
+const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+const day = (t: number) => new Date(t * 1000).toISOString().slice(0, 10)
+const spaced = (fpr: string) => fpr.replace(/(.{4})/g, '$1 ').trim().replace(/^(.{24}) /, '$1  ')
+
+/**
+ * The index a person sees: the listing every keyserver printed since the 1990s, one entry per
+ * key, plus the line no keyserver could print — who claims it, on-chain — linking to the claim.
+ */
+export function indexListing(entries: Entry[], names: Map<string, string | null>): string {
+  const L: string[] = []
+  for (const e of entries) {
+    const keyId = e.fingerprint.slice(-16)
+    const algo = `${ALGO_NAME[e.algo] ?? 'pgp'}${e.algo === 1 && e.bits ? e.bits : ''}`
+    const exp = e.expires ? ` [expires: ${day(e.expires)}]` : ''
+    L.push(`pub   ${algo}/<a href="/pks/lookup?op=get&amp;search=0x${e.fingerprint}">${keyId}</a> ${day(e.created)}${exp}`)
+    L.push(`      Fingerprint=${spaced(e.fingerprint)}`)
+    for (const u of e.uids) L.push(`uid   ${esc(u)}`)
+    const name = names.get(e.owner)
+    const who = name ? `${esc(name)} <span class="dim">${e.owner}</span>` : e.owner
+    L.push(`      claimed by <a href="https://thurin.id/eth/${e.owner}" target="_blank" rel="noopener noreferrer">${who}</a>`)
+    L.push('')
+  }
+  return L.join('\n')
+}
+
+/** One screen, no scripts: what this is, the dirmngr line, a search box, and the results if any. */
+export function frontDoor(req: IncomingMessage, ctx: ChainCtx, search = '', message?: string, listing?: string): string {
+  const host = req.headers.host || 'localhost'
+  const scheme = /https/.test(String(req.headers['x-forwarded-proto'] || '')) ? 'hkps' : 'hkp'
+  const self = `${scheme}://${host}`
+  const dotId = /\.id(:\d+)?$/.test(host)
+  return `<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(host)}</title>
+<style>
+body { background: #1a1a12; color: #faf9f5; font-family: 'Share Tech Mono', ui-monospace, monospace; max-width: 78ch; margin: 3rem auto; padding: 0 1rem; line-height: 1.55; }
+h1 { font-weight: 400; font-size: 1.6rem; margin: 0 0 1.25rem; color: #7c9a3e; }
+h1 span { color: #c9a227; }
+p { margin: 0 0 1.25rem; }
+a { color: #96b84e; }
+form { display: flex; gap: .5rem; flex-wrap: wrap; margin: 0 0 1.5rem; }
+input { flex: 1 1 30ch; font: inherit; background: #141010; color: #faf9f5; border: 1px solid #3a3a2c; border-radius: 3px; padding: .45rem .6rem; }
+input:focus { outline: none; border-color: #7c9a3e; }
+button { font: inherit; background: #7c9a3e; color: #141010; border: 0; border-radius: 3px; padding: .45rem .9rem; cursor: pointer; }
+pre.cmd { white-space: pre; overflow-x: auto; }
+pre { background: #141010; border: 1px solid #3a3a2c; border-radius: 3px; padding: .9rem 1rem; margin: 0 0 1.5rem; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .92rem; }
+.dim { color: #a8a598; }
+.note { color: #a8a598; font-size: .85rem; margin: 0 0 1.5rem; }
+footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #3a3a2c; font-size: .82rem; letter-spacing: .06em; color: #a8a598; display: flex; justify-content: space-between; align-items: flex-start; gap: 2rem; flex-wrap: wrap; }
+footer .version { opacity: .6; }
+footer .cols { display: flex; gap: 3rem; }
+footer .col { display: flex; flex-direction: column; gap: .35rem; }
+footer .col b { color: #faf9f5; font-weight: 600; text-transform: uppercase; font-size: .7rem; letter-spacing: .12em; margin-bottom: .2rem; }
+footer .col a { color: #a8a598; text-decoration: none; }
+footer .col a:hover { color: #7c9a3e; }
+</style>
+<h1>${esc(dotId ? host.replace(/\.id(:\d+)?$/, '') : host)}${dotId ? '<span>.id</span>' : ''}</h1>
+<p>A PGP keyserver whose database is Ethereum. A key is here because its owner published a claim from their own address on the <a href="https://docs.thurin.id/#/contracts" target="_blank" rel="noopener noreferrer">Thurin registry</a>. There is no upload, and nothing to poison: revoke the claim and the key is gone.</p>
+<form action="/pks/lookup" method="get">
+  <input type="hidden" name="op" value="index">
+  <input name="search" value="${esc(search)}" placeholder="fingerprint, key ID, address, or ENS name" aria-label="Search" autofocus>
+  <button>Search for a key</button>
+</form>
+${message ? `<p class="note">${esc(message)}</p>` : ''}
+${listing ? `<pre>${listing}</pre>` : ''}
+<p>Point gpg at it, once:</p>
+<pre class="cmd">echo "keyserver ${esc(self)}" &gt;&gt; ~/.gnupg/dirmngr.conf &amp;&amp; gpgconf --kill dirmngr
+gpg --recv-keys &lt;fingerprint&gt;</pre>
+<footer>
+  <span class="version">thurin keyserver ${VERSION} · ${ctx.network}</span>
+  <div class="cols">
+    <div class="col"><b>Thurin</b>
+      <a href="https://thurin.id" target="_blank" rel="noopener noreferrer">Thurin.id</a>
+      <a href="https://thurin.id/attest" target="_blank" rel="noopener noreferrer">Attest</a>
+      <a href="https://thurinlabs.id" target="_blank" rel="noopener noreferrer">Thurin Labs</a>
+    </div>
+    <div class="col"><b>Keyserver</b>
+      <a href="https://docs.thurin.id/#/cli?id=be-a-keyserver" target="_blank" rel="noopener noreferrer">Run your own</a>
+      <a href="https://docs.thurin.id/#/guides/verify-commits" target="_blank" rel="noopener noreferrer">Verify commits</a>
+      <a href="https://docs.thurin.id/#/guides/verify-release" target="_blank" rel="noopener noreferrer">Verify a release</a>
+    </div>
+    <div class="col"><b>Dev</b>
+      <a href="https://github.com/thurinlabs/thurin-cli" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://docs.thurin.id" target="_blank" rel="noopener noreferrer">Docs</a>
+      <a href="https://docs.thurin.id/#/roadmap" target="_blank" rel="noopener noreferrer">Roadmap</a>
+    </div>
+  </div>
+</footer>
+`
 }
 
 function log(req: IncomingMessage, msg: string) {
