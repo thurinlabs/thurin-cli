@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stringToHex, type Address, type Hex } from 'viem'
-import { REGISTRY_ABI, recordKind } from '@thurinlabs/identity-kit/core'
 import { chainCtx, claimsOf, resolveOwners, detectLookup, readRegistry, type ChainCtx } from '../lib/chain.js'
-import { encodeRecord, decodeRecord, parsePointer, addPointer, renderPointer, kindName, KNOWN_KINDS } from '../lib/records.js'
+import { REGISTRY_ABI, recordKind, encodeRecord, decodeRecord, parsePointer, addPointer, renderPointer, kindName, KNOWN_KINDS } from '@thurinlabs/identity-kit/core'
 import { send, ownerFor, pickIndex, handoff, authorize } from './attest.js'
 import { out, info, ok, bad, dim, bold, label, isJson, CliError, EXIT } from '../lib/output.js'
 
