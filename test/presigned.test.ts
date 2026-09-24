@@ -5,8 +5,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { presignedInputs, preflight } from '../src/commands/attest.js'
 
-// The kit's fixtures: a real key and the clearsigned statement its owner published.
-const F = join(__dirname, '../../identity-kit/src/core/__tests__/fixtures')
+// thurinlabs.eth's real public key and the clearsigned statement it published (copies of the kit's fixtures).
+const F = join(__dirname, 'fixtures')
 const key = readFileSync(join(F, 'company-key.asc'), 'utf8')
 const statement = readFileSync(join(F, 'company-attestation.asc'), 'utf8')
 const OWNER = '0x539C7e1E454296Dc150B95a0acCC05bCa3b33538'
