@@ -37,6 +37,8 @@ ${bold('Claims')} (each runs every check before spending gas)
   thurin revoke [<index>]
   … --no-key --owner <address|ens>              sign here, publish from a wallet elsewhere: prints a
                                                 thurin.id/attest link that carries the signed claim
+  … --statement --owner <address|ens>           key not on this machine: print the line to sign, then
+  … --key-file pub.asc --statement-file s.asc   bring the key and the clearsigned line back; no gpg
   … --authorize [--deadline 7d] [--out f.json]  no ETH here: the keystore signs a permission slip
                                                 (free) that anyone can publish and pay for
       [--relayer <url> | --no-relayer]          post it to a relayer that pays, instead of a link
@@ -81,13 +83,14 @@ async function main() {
       key: { type: 'string', short: 'k' }, calldata: { type: 'boolean' }, 'include-email': { type: 'boolean' }, replace: { type: 'boolean' }, import: { type: 'boolean' },
       name: { type: 'string' }, expires: { type: 'string' }, from: { type: 'string' }, 'private-key': { type: 'boolean' },
       'no-key': { type: 'boolean' }, owner: { type: 'string' }, site: { type: 'string' },
+      statement: { type: 'boolean' }, 'key-file': { type: 'string' }, 'statement-file': { type: 'string' },
       authorize: { type: 'boolean' }, deadline: { type: 'string' }, out: { type: 'string' },
       signer: { type: 'string' }, 'sign-out': { type: 'string' }, signature: { type: 'string' }, 'signature-file': { type: 'string' },
       relayer: { type: 'string' }, 'no-relayer': { type: 'boolean' },
       budget: { type: 'string' }, port: { type: 'string' }, host: { type: 'string' }, 'cache-seconds': { type: 'string' }, file: { type: 'string' }, index: { type: 'string' }, url: { type: 'string' }, 'per-hour': { type: 'string' }, 'free-attests': { type: 'string' }, 'max-gas': { type: 'string' },
     },
   })
-  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'], noRelayer: values['no-relayer'], perHour: values['per-hour'], freeAttests: values['free-attests'], maxGas: values['max-gas'], cacheSeconds: values['cache-seconds'], signOut: values['sign-out'], signatureFile: values['signature-file'] }
+  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'], noRelayer: values['no-relayer'], perHour: values['per-hour'], freeAttests: values['free-attests'], maxGas: values['max-gas'], cacheSeconds: values['cache-seconds'], signOut: values['sign-out'], signatureFile: values['signature-file'], keyFile: values['key-file'], statementFile: values['statement-file'] }
   setJson(!!opts.json)
   if (opts.version) { process.stdout.write(version + '\n'); return }
   const [cmd, ...rest] = positionals
