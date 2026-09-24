@@ -1,6 +1,6 @@
 {
   "name": "@thurinlabs/thurin",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Thurin from a terminal: look up, attest, update, and revoke on-chain PGP identities. Never a wallet; never holds a PGP secret.",
   "license": "MIT",
   "type": "module",

@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createHash, randomBytes } from 'node:crypto'
 import { createWalletClient, http, formatEther, type Address } from 'viem'
 import { REGISTRY_ABI } from '@thurinlabs/identity-kit/core'
 import { chainCtx, type ChainCtx } from '../lib/chain.js'
@@ -53,7 +54,7 @@ export async function relay(_args: string[], opts: Record<string, any>) {
       return reply(res, 200, { ok: true, network: ctx.network, payer: account.address, budgetEth: limits.cfg.budgetEth, spentTodayEth: limits.spentLast24h(), freeAttestsPerOwner: limits.cfg.attestsPerOwner })
     }
     if (req.method !== 'POST') return reply(res, 405, { error: 'POST a hand-off with an authorization' })
-    const caller = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim()
+    const caller = callerKey(req)
     const raw = await readBody(req)
     let h: Handoff
     try { h = decodeHandoff(encodeHandoff(JSON.parse(raw))) } catch (e: any) { return reply(res, 400, { error: `Not a hand-off: ${e.message}` }) }
@@ -76,11 +77,11 @@ export async function relay(_args: string[], opts: Record<string, any>) {
         if (receipt.status !== 'success') throw new CliError(`Transaction reverted: ${hash}`, EXIT.CHAIN)
         return { hash, block: receipt.blockNumber.toString(), owner, op: h.op, proofs, payer: account.address as Address, identity: `https://thurin.id/eth/${owner}` }
       })
-      log(caller, h, `ok ${result.hash} ${Date.now() - t0}ms`)
+      log(h, `ok ${result.hash} ${Date.now() - t0}ms`)
       reply(res, 200, result)
     } catch (e: any) {
       const status = e instanceof LimitError ? e.status : e instanceof CliError ? (e.code === EXIT.CHAIN ? 502 : 400) : 500
-      log(caller, h, `refused ${status}: ${e.message}`)
+      log(h, `refused ${status}: ${e.message}`)
       reply(res, status, { error: e.message })
     }
   }
@@ -89,8 +90,24 @@ export async function relay(_args: string[], opts: Record<string, any>) {
   await new Promise<void>(resolve => { for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => { server.close(); resolve() }) })
 }
 
-function log(caller: string, h: Handoff, msg: string) {
-  process.stdout.write(`${new Date().toISOString()} ${caller} ${h.op} ${h.owner} ${msg}\n`)
+// The rate limit needs "same caller as before", not who the caller is: key it by a hash of the
+// IP under a salt that dies with the process, and never write the IP anywhere. The proxy header
+// is believed only from a local proxy; its last entry is the one that proxy added.
+const SALT = randomBytes(16)
+export function clientIp(req: Pick<IncomingMessage, 'headers' | 'socket'>): string {
+  const peer = req.socket.remoteAddress || '?'
+  const local = peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1'
+  const xff = req.headers['x-forwarded-for']
+  if (!local || !xff) return peer
+  return String(xff).split(',').pop()!.trim() || peer
+}
+function callerKey(req: IncomingMessage): string {
+  return createHash('sha256').update(SALT).update(clientIp(req)).digest('hex').slice(0, 16)
+}
+
+// Op, owner, and tx are public on-chain; the caller's IP is not logged.
+function log(h: Handoff, msg: string) {
+  process.stdout.write(`${new Date().toISOString()} ${h.op} ${h.owner} ${msg}\n`)
 }
 
 function reply(res: ServerResponse, status: number, body: unknown) {

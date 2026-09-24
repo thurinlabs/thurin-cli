@@ -260,7 +260,7 @@ gpg --recv-keys &lt;fingerprint&gt;</pre>
 `
 }
 
+// No caller IP: a log of who looked up which key is the thing Thurin's privacy rule forbids.
 function log(req: IncomingMessage, msg: string) {
-  const caller = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim()
-  process.stdout.write(`${new Date().toISOString()} ${caller} ${req.method} ${req.url} ${msg}\n`)
+  process.stdout.write(`${new Date().toISOString()} ${req.method} ${req.url} ${msg}\n`)
 }

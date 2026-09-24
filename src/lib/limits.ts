@@ -6,7 +6,7 @@
 export interface LimitsConfig {
   /** ETH the relayer may spend per rolling 24 h. */
   budgetEth: number
-  /** Requests per caller (IP) per hour. */
+  /** Requests per caller per hour (the relay keys callers by a salted hash of the IP). */
   perCallerPerHour: number
   /** `attest` calls per owner address, ever (per process). Other ops are rate-limited only. */
   attestsPerOwner: number
