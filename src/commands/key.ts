@@ -36,7 +36,7 @@ async function keyList() {
 
 async function keyCreate(args: string[], opts: Record<string, any>) {
   const name = opts.name || args[0]
-  if (!name) throw new CliError('Usage: thurin key create <name> [--expires 2y]  (a name with no email; "thurin" is the suggestion)', EXIT.USAGE)
+  if (!name) throw new CliError('Usage: thurin key create <name> [--expires 2y]  (a name with no email, e.g. "Your Name")', EXIT.USAGE)
   const expires = opts.expires || '2y'
   info(`Creating an Ed25519 key "${name}" (certify + sign, Cv25519 encryption subkey, expires ${expires}). gpg will ask for a passphrase.`)
   const fpr = await quickGenKey(name, expires)
