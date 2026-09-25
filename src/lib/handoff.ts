@@ -13,12 +13,12 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { stringToHex, type Address, type Hex } from 'viem'
 import {
-  fingerprintToBytes, attestTypedData, reattestTypedData, updateKeyTypedData, revokeTypedData, setRecordTypedData, OWNER_REVOKE_REASONS,
+  fingerprintToBytes, attestTypedData, reattestTypedData, updateKeyTypedData, revokeTypedData, setRecordTypedData, markCompromisedTypedData, OWNER_REVOKE_REASONS,
   type RevokeReason,
 } from '@thurinlabs/identity-kit/core'
 
-export type HandoffOp = 'attest' | 'reattest' | 'update-key' | 'revoke' | 'set-record'
-const OPS: HandoffOp[] = ['attest', 'reattest', 'update-key', 'revoke', 'set-record']
+export type HandoffOp = 'attest' | 'reattest' | 'update-key' | 'revoke' | 'set-record' | 'mark-compromised'
+const OPS: HandoffOp[] = ['attest', 'reattest', 'update-key', 'revoke', 'set-record', 'mark-compromised']
 
 export interface Authorization {
   nonce: number
@@ -35,7 +35,7 @@ export interface Handoff {
   /** The address the claim is for. Lowercase. */
   owner: string
   fingerprint: string
-  /** The key exactly as it goes on-chain, 0x hex. Absent for revoke and set-record. */
+  /** The key exactly as it goes on-chain, 0x hex. Absent for revoke, set-record and mark-compromised. */
   key?: string
   /** The signature as 0x hex, or a whole clearsigned message as text; attest and reattest only. */
   signature?: string
@@ -43,7 +43,7 @@ export interface Handoff {
   keepRecords?: boolean
   /** revoke: '', 'compromised', 'retired', 'superseded', or 'other'. */
   reason?: RevokeReason
-  /** Claim index to replace (reattest), update (update-key), revoke, or set a record on. */
+  /** Claim index to replace (reattest), update (update-key), revoke, set a record on, or mark compromised. */
   index?: number
   /** set-record: the record name as submitted (e.g. pointer or thurin.pointer) and text value ('' clears). */
   kind?: string
@@ -53,7 +53,7 @@ export interface Handoff {
 }
 
 export const HANDOFF_PARAM = 'handoff'
-export const FOR_FN: Record<HandoffOp, string> = { attest: 'attestFor', reattest: 'reattestFor', 'update-key': 'updateKeyFor', revoke: 'revokeFor', 'set-record': 'setRecordFor' }
+export const FOR_FN: Record<HandoffOp, string> = { attest: 'attestFor', reattest: 'reattestFor', 'update-key': 'updateKeyFor', revoke: 'revokeFor', 'set-record': 'setRecordFor', 'mark-compromised': 'markCompromisedFor' }
 
 /**
  * The link's fragment: `<base64url JSON>[.<base64url key>[.<base64url signature>]]`. The key and
@@ -84,7 +84,7 @@ export function decodeHandoff(encoded: string): Handoff {
   if (h?.v !== 2 || !OPS.includes(h.op)) throw new Error('Not a Thurin hand-off')
   if (!/^0x[0-9a-f]{40}$/.test(h.owner || '')) throw new Error('Hand-off has no valid owner')
   if (h.op !== 'attest' && !Number.isInteger(h.index)) throw new Error('Hand-off names no claim index')
-  if (h.op !== 'revoke' && h.op !== 'set-record' && !isHex(h.key)) throw new Error('Hand-off carries no key')
+  if ((h.op === 'attest' || h.op === 'reattest' || h.op === 'update-key') && !isHex(h.key)) throw new Error('Hand-off carries no key')
   if (h.reason != null && !(OWNER_REVOKE_REASONS as readonly string[]).includes(h.reason)) throw new Error(`Unknown revoke reason "${h.reason}"`)
   if (h.keepRecords != null && typeof h.keepRecords !== 'boolean') throw new Error('Hand-off has an invalid keepRecords')
   if (h.op === 'set-record' && (typeof h.kind !== 'string' || typeof h.value !== 'string')) throw new Error('Hand-off names no record')
@@ -123,6 +123,7 @@ export function typedDataFor(h: Handoff, chainId: number, registry: Address) {
     case 'update-key': return updateKeyTypedData(chainId, registry, { ...common, index: BigInt(h.index!), key: h.key! })
     case 'revoke': return revokeTypedData(chainId, registry, { ...common, index: BigInt(h.index!), reason: h.reason ?? '' })
     case 'set-record': return setRecordTypedData(chainId, registry, { ...common, index: BigInt(h.index!), kind: h.kind!, value: h.value ?? '' })
+    case 'mark-compromised': return markCompromisedTypedData(chainId, registry, { ...common, index: BigInt(h.index!) })
   }
 }
 
@@ -141,6 +142,7 @@ export function forArgsOf(h: Handoff): unknown[] {
     case 'update-key': return [h.owner, BigInt(h.index!), payloadArg(h.key!), d, a.signature]
     case 'revoke': return [h.owner, BigInt(h.index!), h.reason ?? '', d, a.signature]
     case 'set-record': return [h.owner, BigInt(h.index!), h.kind!, h.value ?? '', d, a.signature]
+    case 'mark-compromised': return [h.owner, BigInt(h.index!), d, a.signature]
   }
 }
 

@@ -181,7 +181,7 @@ Keystores are the same format `cast`, geth, and every wallet import. `--password
 
 ## Networks
 
-`--network mainnet|sepolia|local` (local = a running anvil), `--rpc <url>` for your own node. Defaults live in `~/.config/thurin/config.json`. The registry (PGPRegistry v3) is at `0x0D9beb4178BB81f123d8b68cc4BB58dc538b9203` on Ethereum mainnet and Sepolia.
+`--network mainnet|sepolia|local` (local = a running anvil), `--rpc <url>` for your own node. Defaults live in `~/.config/thurin/config.json`. The registry (PGPRegistry v3) is at `0xFa6956c11163517249f8A67F5560a4406B519451` on Ethereum mainnet and Sepolia.
 
 ## What's next
 

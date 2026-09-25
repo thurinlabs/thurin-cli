@@ -14,7 +14,7 @@ const h: Handoff = {
   signature: '0xc20b0401160a00000000000000',
   includeEmail: false,
 }
-const REGISTRY = '0x0D9beb4178BB81f123d8b68cc4BB58dc538b9203'
+const REGISTRY = '0xFa6956c11163517249f8A67F5560a4406B519451'
 // Hardhat/anvil account #0 — a well-known test key, never funded on a real network.
 const acct = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80')
 
@@ -56,6 +56,7 @@ describe('authorization', () => {
       { ...base, op: 'update-key', index: 0, signature: undefined },
       { ...base, op: 'revoke', index: 2, key: undefined, signature: undefined, reason: 'compromised' },
       { ...base, op: 'set-record', index: 0, key: undefined, signature: undefined, kind: 'security', value: 'mailto:x@example.com' },
+      { ...base, op: 'mark-compromised', index: 2, key: undefined, signature: undefined },
     ]
     for (const c of cases) {
       const typed = typedDataFor(c, 1, REGISTRY)
@@ -71,6 +72,9 @@ describe('authorization', () => {
     expect(re[5]).toBe(false)                              // keepRecords
     const rv = forArgsOf({ ...cases[3], authorization: { ...cases[3].authorization!, signature: '0x' } })
     expect(rv[2]).toBe('compromised')
+    const mc = forArgsOf({ ...cases[5], authorization: { ...cases[5].authorization!, signature: '0x' } })
+    expect(mc).toHaveLength(4)                             // owner, index, deadline, permission
+    expect(decodeHandoff(encodeHandoff({ ...cases[5], authorization: undefined })).op).toBe('mark-compromised')
   })
   it('binds the chain: a Sepolia signature does not recover on mainnet', async () => {
     const c: Handoff = { ...h, owner: acct.address.toLowerCase(), authorization: { nonce: 0, deadline: 1_800_000_000, signature: '0x' } }

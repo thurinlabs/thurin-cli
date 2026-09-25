@@ -436,7 +436,7 @@ export async function revoke(args: string[], opts: Record<string, any>) {
   if (late && reason !== 'compromised') throw new CliError(`Claim #${idx} is already revoked. Found out its key was compromised? thurin revoke ${idx} --reason compromised`, EXIT.FAILED)
   if (late && c.revokeReason === 'compromised') throw new CliError(`Claim #${idx} is already marked compromised`, EXIT.FAILED)
   if (late && claims.some(o => !o.revokedAt && o.fingerprint === c.fingerprint)) throw new CliError(`${c.fingerprint} still has an active claim here; revoke that one as compromised first`, EXIT.FAILED)
-  if (opts.authorize) return authorize(ctx, opts, 'revoke', owner, c.fingerprint, null, idx)
+  if (opts.authorize) return authorize(ctx, opts, late ? 'mark-compromised' : 'revoke', owner, c.fingerprint, null, idx)
   const what = late ? `Mark claim #${idx}'s key (${c.fingerprint}) as compromised; this address can never claim it again` : `Revoke claim #${idx} (${c.fingerprint})${reason ? ` as ${reason}` : ''}${reason === 'compromised' ? '; this address can never claim it again' : ''}`
   const r = await send(ctx, opts, 'revoke', [BigInt(idx), reason], what)
   out({ ...r, owner, index: idx, reason, markedLater: late, tx: txUrl(ctx, r.hash) }, () => `${late ? `${bad('Marked')} claim #${idx}'s key compromised` : `${bad('Revoked')} claim #${idx}${reason ? ` (${reason})` : ''}`}\n${label('tx')}${txUrl(ctx, r.hash)}`)
