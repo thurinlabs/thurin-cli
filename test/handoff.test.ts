@@ -14,7 +14,7 @@ const h: Handoff = {
   signature: '0xc20b0401160a00000000000000',
   includeEmail: false,
 }
-const REGISTRY = '0x4f2d70799cAAD651C7c564426AA74A842c1331B6'
+const REGISTRY = '0x0D9beb4178BB81f123d8b68cc4BB58dc538b9203'
 // Hardhat/anvil account #0 — a well-known test key, never funded on a real network.
 const acct = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80')
 
@@ -25,8 +25,16 @@ describe('hand-off link', () => {
   it('lands the payload in the fragment, with nothing URL-unsafe in it', () => {
     const url = handoffUrl('https://thurin.id/', h)
     expect(url.startsWith('https://thurin.id/attest#handoff=')).toBe(true)
-    expect(url.split('#')[1]).toMatch(/^handoff=[A-Za-z0-9_-]+$/)
+    expect(url.split('#')[1]).toMatch(/^handoff=[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+){0,2}$/)
     expect(readHandoffInput(url)).toEqual(h)
+  })
+  it('carries the key and signature as raw bytes: a clearsigned message stays text, and the link is about half as long', () => {
+    const cs = '-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA512\n\nI control the Ethereum address: 0x00\n-----BEGIN PGP SIGNATURE-----\n\nabc\n-----END PGP SIGNATURE-----\n'
+    expect(decodeHandoff(encodeHandoff({ ...h, signature: cs })).signature).toBe(cs)
+    const key = '0x' + 'c6'.padEnd(2 * 3000, 'ab')                          // a 3 KB key
+    const hexInJson = Buffer.from(JSON.stringify({ ...h, key }), 'utf8').toString('base64url').length
+    expect(encodeHandoff({ ...h, key }).length).toBeLessThan(hexInJson * 0.55)
+    expect(decodeHandoff(encodeHandoff({ ...h, key })).key).toBe(key)
   })
   it('refuses anything that is not a hand-off', () => {
     expect(() => decodeHandoff(Buffer.from('{"v":2}').toString('base64url'))).toThrow(/Not a Thurin hand-off/)

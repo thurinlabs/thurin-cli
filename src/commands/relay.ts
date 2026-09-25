@@ -75,7 +75,7 @@ export async function relay(_args: string[], opts: Record<string, any>) {
         const hash = await wallet.writeContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: fn, args, account, chain: ctx.client.chain } as any)
         const receipt = await ctx.client.waitForTransactionReceipt({ hash })
         if (receipt.status !== 'success') throw new CliError(`Transaction reverted: ${hash}`, EXIT.CHAIN)
-        return { hash, block: receipt.blockNumber.toString(), owner, op: h.op, proofs, payer: account.address as Address, identity: `https://thurin.id/eth/${owner}` }
+        return { hash, block: receipt.blockNumber.toString(), owner, op: h.op, proofs, payer: account.address as Address, identity: ctx.site ? `${ctx.site}/eth/${owner}` : null }
       })
       log(h, `ok ${result.hash} ${Date.now() - t0}ms`)
       reply(res, 200, result)

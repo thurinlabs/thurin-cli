@@ -39,10 +39,29 @@ async function recordGet(args: string[], opts: Record<string, any>) {
     }
   }
   if (!results.length) throw new CliError(`No ${kind ?? ''} record${kind ? '' : 's'} on any active claim of ${args[0]}`.replace('  ', ' '), EXIT.FAILED)
-  out({ kind, records: results }, () => results.map(r => {
-    const head = `${label('owner')}${r.owner}  claim #${r.index}  ${dim(r.fingerprint)}\n${label('kind')}${r.kind}`
-    if (r.kind === 'thurin.pointer') { try { return `${head}\n${renderPointer(parsePointer(r.value))}` } catch { /* fall through */ } }
-    return `${head}\n${r.value}`
+  // One record asked for by name: its value exactly as stored on stdout (pipe it: … canary | gpg --verify),
+  // where it's from on stderr.
+  if (kind && results.length === 1 && !isJson()) {
+    const r = results[0]
+    process.stderr.write(dim(`${r.owner}  claim #${r.index}  ${r.fingerprint}  ${r.kind}`) + '\n')
+    process.stdout.write(r.value.endsWith('\n') ? r.value : r.value + '\n')
+    return
+  }
+  // One header per claim, then its records: the name, and the value beside it (or indented below it
+  // when it runs over one line, like a clearsigned canary or the release list).
+  const claims = new Map<string, typeof results>()
+  for (const r of results) { const k = `${r.owner} ${r.index}`; claims.set(k, [...(claims.get(k) ?? []), r]) }
+  out({ name: kind, records: results.map(({ kind: name, ...r }) => ({ name, ...r })) }, () => [...claims.values()].map(rs => {
+    const width = Math.max(...rs.map(r => r.kind.length))
+    const lines = rs.map(r => {
+      let text = r.value
+      if (r.kind === 'thurin.pointer') { try { text = renderPointer(parsePointer(r.value)) } catch { /* shown as stored */ } }
+      text = text.replace(/\s+$/, '')
+      return text.includes('\n')
+        ? `  ${bold(r.kind)}\n${text.split('\n').map(l => (l ? `      ${l}` : '')).join('\n')}`
+        : `  ${bold(r.kind.padEnd(width))}   ${text}`
+    })
+    return `${rs[0].owner}  claim #${rs[0].index}  ${dim(rs[0].fingerprint)}\n${lines.join('\n')}`
   }).join('\n\n'))
 }
 
@@ -59,12 +78,12 @@ async function recordSet(args: string[], opts: Record<string, any>) {
   const claims = await claimsOf(ctx, owner)
   const idx = opts.index !== undefined ? Number(opts.index) : pickIndex(undefined, claims)
   if (!claims[idx]) throw new CliError(`No claim #${idx}`, EXIT.USAGE)
-  if (!isJson()) process.stderr.write(`${label('claim')}#${idx} ${claims[idx].fingerprint}\n${label('kind')}${kind}\n${label('value')}${value ? `${new TextEncoder().encode(value).length} bytes` : dim('(clear)')}\n`)
+  if (!isJson()) process.stderr.write(`${label('claim')}#${idx} ${claims[idx].fingerprint}\n${label('name')}${kind}\n${label('value')}${value ? `${new TextEncoder().encode(value).length} bytes` : dim('(clear)')}\n`)
   const o = { ...opts, _record: { kind, value } }
   if (opts.authorize) return authorize(ctx, o, 'set-record', owner, claims[idx].fingerprint, null, idx)
   if (opts.noKey) return handoff(ctx, o, 'set-record', owner, claims[idx].fingerprint, null, idx)
   const r = await send(ctx, opts, 'setRecord', [BigInt(idx), kind, value], value ? `Set ${kind} on claim #${idx}` : `Clear ${kind} on claim #${idx}`)
-  out({ ...r, owner, index: idx, kind, bytes: value.length }, () => `${ok(value ? 'Set' : 'Cleared')} ${kind} on claim #${idx}\n${label('tx')}${ctx.explorerUrl ? `${ctx.explorerUrl}/tx/${r.hash}` : r.hash}`)
+  out({ ...r, owner, index: idx, name: kind, bytes: value.length }, () => `${ok(value ? 'Set' : 'Cleared')} ${kind} on claim #${idx}\n${label('tx')}${ctx.explorerUrl ? `${ctx.explorerUrl}/tx/${r.hash}` : r.hash}`)
 }
 
 /**

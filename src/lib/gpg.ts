@@ -71,6 +71,7 @@ export async function findKey(fprOrName: string): Promise<KeyListing> {
   const keys = await listKeys(true)
   const q = fprOrName.replace(/\s+/g, '').toUpperCase()
   const hit = keys.find(k => k.fingerprint === q || k.fingerprint.endsWith(q) || k.userIDs.some(u => u.toLowerCase().includes(fprOrName.toLowerCase())))
+  if (!keys.length) throw new CliError(`No signing key in your gpg keyring. ${MAKE_KEY_HINT}`, EXIT.FAILED)
   if (!hit) throw new CliError(`No secret key matching "${fprOrName}" in your gpg keyring (thurin key list)`, EXIT.FAILED)
   return hit
 }
@@ -85,7 +86,7 @@ export function attestStatement(address: string) {
  * key, like most YubiKey-era keys) we pin it with "!": letting gpg pick "the
  * signing subkey" chose a subkey sitting in a card's Authentication slot and
  * produced bad signatures (2026-09-14). If the primary is certify-only (the shape
- * `thurin key create` makes, and the company key) we pin its live signing subkey.
+ * the company key uses) we pin its live signing subkey.
  */
 export async function signingKeyFor(fingerprint: string): Promise<string> {
   const out = await gpg(['--with-colons', '--with-fingerprint', '--with-fingerprint', '--list-secret-keys', fingerprint])
@@ -113,20 +114,11 @@ export async function exportMinimal(fingerprint: string): Promise<string> {
   return gpg(['--export-options', 'export-minimal,no-export-attributes', '--armor', '--export', fingerprint])
 }
 
-export async function quickGenKey(name: string, expires: string): Promise<string> {
-  // Certify+sign primary, encryption subkey, no email unless the user typed one.
-  await gpg(['--quick-gen-key', name, 'ed25519', 'cert', expires])
-  const keys = await listKeys(true)
-  const created = keys.filter(k => k.userIDs.includes(name)).sort((a, b) => b.created.localeCompare(a.created))[0]
-  if (!created) throw new CliError('Key was created but could not be found in the keyring', EXIT.FAILED)
-  await gpg(['--quick-add-key', created.fingerprint, 'ed25519', 'sign', expires])
-  await gpg(['--quick-add-key', created.fingerprint, 'cv25519', 'encr', expires])
-  return created.fingerprint
-}
-
-export async function quickAddUid(fingerprint: string, name: string) {
-  await gpg(['--quick-add-uid', fingerprint, name])
-}
+/** How to make a key or add a name: gpg's own commands (Thurin never makes keys). */
+export const MAKE_KEY_HINT = `Make one with gpg:
+  gpg --quick-gen-key "Your Name" ed25519 sign 2y
+  gpg --quick-add-key <fingerprint> cv25519 encr 2y`
+export const addNameHint = (fpr: string) => `gpg --quick-add-uid ${fpr} "Your Name"`
 
 export async function importKey(armored: string): Promise<string> {
   return gpg(['--import'], armored)

@@ -68,7 +68,7 @@ function checkLine(v: PGPVerification | null | undefined, mine: boolean): string
 }
 
 function fateWord(f: ClaimFate | undefined, revoked: boolean): string {
-  if (f?.state === 'replaced') return dim(`replaced → #${f.by}`)
+  if (f?.state === 'replaced') return dim(`replaced → #${f.by}${f.compromised ? ' (key compromised)' : ''}`)
   if (f?.state === 'revoked') return dim(f.reason ? `revoked (${f.reason})` : 'revoked')
   return revoked ? dim('revoked') : 'active'
 }
@@ -89,7 +89,7 @@ function render(i: any): string {
     L.push(`${label('key')}${i.current.keyInfo?.algorithm ?? '?'} · ${i.current.keyInfo?.created ? `created ${i.current.keyInfo.created.slice(0, 10)} · ` : ''}claimed ${new Date(i.current.createdAt * 1000).toISOString().slice(0, 10)}${i.current.keyInfo?.expires ? ` · expires ${i.current.keyInfo.expires.slice(0, 10)}` : ''}`)
   } else {
     const c = i.claims.find((c: Claim) => !c.revokedAt)
-    L.push(`${label('fingerprint')}${c ? c.fingerprint : i.claims[0].fingerprint}  ${c ? checkLine(c.verification, i.mine) : bad('✗ no active claim')}`)
+    L.push(c ? `${label('fingerprint')}${c.fingerprint}  ${checkLine(c.verification, i.mine)}` : `${label('current')}${bad('✗ no active claim')}`)
   }
   if (i.proofs.length) { L.push(label('proofs')); for (const p of i.proofs) L.push(`  ${p.verified ? ok('✓') : bad('✗')} ${p.label.padEnd(10)} ${p.display}${p.verified ? '' : dim('  ' + (p.reason || ''))}`) }
   else if (i.current) L.push(`${label('proofs')}${dim('none')}`)

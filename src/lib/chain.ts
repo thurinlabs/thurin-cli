@@ -14,9 +14,11 @@ export interface ChainCtx {
   client: PublicClient
   registry: Address
   explorerUrl: string
+  /** Where identity links point: --site, the config's site, or thurin.id on mainnet (it reads mainnet only). */
+  site: string | null
 }
 
-export function chainCtx(opts: { network?: string; rpc?: string }): ChainCtx {
+export function chainCtx(opts: { network?: string; rpc?: string; site?: string }): ChainCtx {
   const cfg = readConfig()
   const net = opts.network || process.env.THURIN_NETWORK || cfg.network || 'mainnet'
   if (!isNetworkName(net)) throw new CliError(`Unknown network "${net}" (mainnet, sepolia, local)`, EXIT.USAGE)
@@ -24,7 +26,8 @@ export function chainCtx(opts: { network?: string; rpc?: string }): ChainCtx {
   const rpcUrl = opts.rpc || process.env.THURIN_RPC_URL || cfg.rpc?.[net] || reg.defaultRpcUrl
   // `as Chain`: with the kit linked from a sibling checkout there are two copies of viem's types.
   const client = createPublicClient({ chain: chainFor(net) as unknown as Chain, transport: http(rpcUrl) })
-  return { network: net, rpcUrl, client, registry: reg.address as Address, explorerUrl: reg.explorerUrl }
+  const site = opts.site || cfg.site || (net === 'mainnet' ? 'https://thurin.id' : null)
+  return { network: net, rpcUrl, client, registry: reg.address as Address, explorerUrl: reg.explorerUrl, site: site ? site.replace(/\/+$/, '') : null }
 }
 
 /** A claim as the CLI shows it: the on-chain row plus the stored key and signature, and their verification. */

@@ -9,70 +9,178 @@ import { keyserver } from './commands/keyserver.js'
 import { record } from './commands/record.js'
 import { ens } from './commands/ens.js'
 import { setJson, CliError, EXIT, bold, dim } from './lib/output.js'
+import { REGISTRY_ADDRESS } from '@thurinlabs/identity-kit/core'
 
 const { version } = createRequire(import.meta.url)('../package.json') as { version: string }
 
-const HELP = `${bold('thurin')} ${version} — your online identity, from a terminal. Never a wallet; never holds a PGP secret.
+const HELP = `${bold('thurin')} ${version} — your PGP key on your Ethereum address, from a terminal.
 
-${bold('Look up')}
-  thurin status <ens|0x|fingerprint|keyid>     claims, verification, proofs, EFP
+  thurin status <ens|0x|fingerprint|keyid>   look up anyone's claims and proofs
+  thurin attest                              add your PGP key to your address
+  thurin reattest | update-key | revoke      change or end your claim
+  thurin record get | set | clear            records on your claim
+  thurin key ...                             your PGP key (gpg does the work)
+  thurin wallet ...                          your address (keystores)
+  thurin ens check | link <name>             the name's id.thurin record
+  thurin keyserver | relay                   serve keys to gpg, or pay for others' claims
 
-${bold('Your PGP key')} (gpg does the work)
-  thurin key list                               keys in your keyring, with published name + proofs
-  thurin key create <name> [--expires 2y]       Ed25519 key with an encryption subkey, no email
-  thurin key add-name <fpr> <name>              add a name without an email (the published name)
-  thurin key export [<fpr>]                     minimal armored export
-  thurin key fetch <identity> [--import]        the key stored on-chain for an identity
+More: thurin help <command>   (e.g. thurin help attest)
+Options: --network mainnet|sepolia|local   --json   --yes      Docs: https://docs.thurin.id
+`
+
+/** The details for each command, shown by `thurin help <command>` or `thurin <command> --help`. */
+const TOPICS: Record<string, string> = {
+  status: `${bold('Look up')}
+
+  thurin status <ens|0x|fingerprint|keyid>
+      Claims, verification, proofs, and EFP for anyone. No keystore needed.
+`,
+  key: `${bold('Your PGP key')}  (gpg does the work)
+
+  thurin key list
+      Keys in your keyring, with the published name and proofs.
+
+  thurin key export [<fpr>]
+      A minimal armored export.
+
+  thurin key fetch <identity> [--import]
+      The key stored on-chain for an identity.
+
   thurin key default <fpr>
+      The key to use when --key isn't given.
 
-${bold('Your address')} (V3 keystores under ~/.config/thurin/keystores)
-  thurin wallet create <name>                   fresh identity address; mnemonic shown once
-  thurin wallet import <name> [--from x.json]   private key, mnemonic, or an existing keystore
-  thurin wallet list | export <name> [--private-key] | default <name>
+  Thurin doesn't make or change keys; gpg does:
+      gpg --quick-gen-key "Your Name" ed25519 sign 2y
+      gpg --quick-add-key <fingerprint> cv25519 encr 2y
+      gpg --quick-add-uid <fingerprint> "Your Name"    a name without an email
+`,
+  wallet: `${bold('Your address')}  (keystores in ~/.config/thurin/keystores)
 
-${bold('Claims')} (each runs every check before spending gas)
+  thurin wallet create <name>
+      A fresh address. The 12 words are shown once.
+
+  thurin wallet import <name> [--from x.json]
+      From a private key, 12 words, or an existing keystore.
+
+  thurin wallet list
+  thurin wallet export <name> [--private-key]
+  thurin wallet default <name>
+
+  THURIN_PRIVATE_KEY in the environment also works, for scripts.
+`,
+  claims: `${bold('Claims')}  (every check runs before any gas is spent)
+
   thurin attest [--key <fpr>] [--include-email]
-  thurin update-key [<index>] [--include-email] new proofs on the same key, no new signature
-  thurin reattest [<index>] [--key <fpr>]       revoke + publish in one transaction; records move to
-                                                the new claim (--drop-records leaves them behind)
-  thurin revoke [<index>] [--reason <r>]        compromised, retired, superseded, or other
-  … --no-key --owner <address|ens>              sign here, publish from a wallet elsewhere: prints a
-                                                thurin.id/attest link that carries the signed claim
-  … --statement --owner <address|ens>           key not on this machine: print the line to sign, then
-  … --key-file pub.gpg --statement-file s.sig   bring the key and the signature back; no gpg here
-  … --authorize [--deadline 7d] [--out f.json]  no ETH here: the keystore signs a permission slip
-                                                (free) that anyone can publish and pay for
-      [--relayer <url> | --no-relayer]          post it to a relayer that pays, instead of a link
-      [--signer <cmd>]                          sign the slip with a program (a card): typed data on its
-                                                stdin, signature on its stdout. Needs --owner
-      [--sign-out f.json]                       air gap: write what needs signing and stop, then
-  thurin authorize finish f.json --signature 0x…   (or --signature-file) to check and hand it out
-  thurin submit <link|file>                     publish someone's authorization from this keystore
+      Add your PGP key to your address.
 
-${bold('Records')} (small values on your claim; the chain names what you put out)
-  thurin record get <identity> <kind>           anyone can read; thurin.pointer lists releases
-  thurin record add-release <name> <SHA256SUMS> [--url u]   name a release on-chain by its checksum file
-  thurin record set <kind> <value|--file f> | clear <kind>
+  thurin update-key [<index>] [--include-email]
+      New names or proofs on the same key. No new signature.
 
-  thurin ens check <name>                       does the name's id.thurin record point at its claim?
-  thurin ens link <name> [--key <fpr>]          set it from the keystore; --calldata prints the tx for
-                                                the wallet that manages the name instead
+  thurin reattest [<index>] --key <fpr>
+      Replace a claim in one transaction. Its records move to the new one.
+      --drop-records    leave the records on the old claim
+      --compromised     also mark the old key compromised
 
-${bold('Be a keyserver')} (gpg reads keys from Ethereum; no upload, no database)
+  thurin revoke [<index>] [--reason compromised|retired|other]
+      End a claim. "compromised" is final: this address can never claim
+      that key again. On a claim already revoked or replaced,
+      --reason compromised marks it later, once.
+
+More: thurin help no-eth   (your ETH is elsewhere, or you have none)
+`,
+  'no-eth': `${bold('Your ETH is elsewhere, or you have none')}
+
+  --no-key --owner <address|ens>
+      Sign here and publish from a wallet elsewhere, through a link.
+
+  --statement --owner <address|ens>
+      The key isn't on this machine: print the line to sign.
+
+  --key-file pub.gpg --statement-file s.sig
+      Bring the key and signature back. No gpg needed here.
+
+  --authorize [--deadline 7d] [--out f.json]
+      No ETH here: sign a free permission that anyone can publish and pay for.
+      --relayer <url>     post it to a relayer that pays
+      --no-relayer        make a link instead
+      --signer <cmd>      sign with a program, e.g. a card (needs --owner)
+      --sign-out f.json   air gap: write what needs signing, and stop
+
+  thurin authorize finish f.json --signature 0x…
+      Check an air-gapped signature and hand the permission out.
+
+  thurin submit <link|file>
+      Publish someone's permission from this keystore.
+
+  --site <url>
+      Where links point. Default https://thurin.id.
+`,
+  record: `${bold('Records')}  (small values on your claim)
+
+  thurin record get <identity> [<name>]
+      Anyone can read. Without a name, every record on the claim. With one,
+      just its value, so it pipes: … get <identity> canary | gpg --verify
+
+  thurin record set <name> <value | --file f>
+      A name without a dot gets thurin. in front.
+
+  thurin record clear <name>
+
+  thurin record add-release <name> <SHA256SUMS> [--url u]
+      Name a release on-chain by its checksum file.
+
+  --index <n>
+      Which claim, when the address has more than one active.
+`,
+  ens: `${bold('ENS')}  (mainnet names only)
+
+  thurin ens check <name>
+      Does the name's id.thurin record point at its claim?
+
+  thurin ens link <name> [--key <fpr>]
+      Set it from the keystore.
+      --calldata    print the transaction for the wallet that manages the name
+`,
+  keyserver: `${bold('Keyserver')}  (gpg reads keys from Ethereum; no upload, no database)
+
   thurin keyserver [--port 11371] [--host 127.0.0.1] [--cache-seconds 60]
-  then: gpg --keyserver hkp://127.0.0.1:11371 --recv-keys <fingerprint>
+      Then: gpg --keyserver hkp://127.0.0.1:11371 --recv-keys <fingerprint>
+`,
+  relay: `${bold('Relayer')}  (the one command that spends: gas only, within a budget)
 
-${bold('Run a relayer')} (the one command that spends: gas only, within a budget, from a hot key)
-  thurin relay --account <hot> [--budget 0.01] [--port 8787] [--free-attests 1] [--per-hour 10] [--max-gas 3000000]
+  thurin relay --account <hot key> [options]
+      Publishes other people's permissions and pays the fee.
+      --budget 0.01       ETH per day
+      --free-attests 1    per address
+      --per-hour 10       requests per caller
+      --max-gas 3000000   per transaction
+      --port 8787
+`,
+  options: `${bold('Options')}
 
-${bold('Options')}
-  --network mainnet|sepolia|local   --rpc <url>   --account <name>   --password-file <path>
-  --site <url>   (where --no-key / --authorize links point; default https://thurin.id)
-  --json   --yes   --version   --help
+  --network mainnet|sepolia|local    which chain (default mainnet)
+  --rpc <url>                        your own node
+  --account <name>                   a keystore (or THURIN_PRIVATE_KEY)
+  --password-file <path>             for the keystore
+  --site <url>                       where links point
+  --json                             machine-readable output
+  --yes                              don't ask before sending
+  --version  --help
 
 Exit codes: 0 ok · 1 a check failed · 2 usage · 3 chain or network error
-${dim('Docs: https://docs.thurin.id · Contract 0x9302E02e2869e129aC8516fE5eFFd51EA3082c09 on every network')}
-`
+${dim(`Contract ${REGISTRY_ADDRESS} on Ethereum mainnet and Sepolia`)}
+`,
+}
+const TOPIC_OF: Record<string, string> = {
+  attest: 'claims', reattest: 'claims', 'update-key': 'claims', revoke: 'claims', claims: 'claims',
+  'no-eth': 'no-eth', submit: 'no-eth', authorize: 'no-eth',
+  status: 'status', key: 'key', wallet: 'wallet', record: 'record', ens: 'ens', keyserver: 'keyserver', relay: 'relay', options: 'options',
+}
+function topicHelp(name: string | undefined): string {
+  const t = name ? TOPIC_OF[name] : undefined
+  if (!t) return HELP
+  return TOPICS[t] + (t === 'options' ? '' : `\n${dim('Options: thurin help options')}\n`)
+}
 
 async function main() {
   const { values, positionals } = parseArgs({
@@ -82,11 +190,11 @@ async function main() {
       json: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
       network: { type: 'string', short: 'n' }, rpc: { type: 'string' }, account: { type: 'string', short: 'a' }, 'password-file': { type: 'string' },
       key: { type: 'string', short: 'k' }, calldata: { type: 'boolean' }, 'include-email': { type: 'boolean' }, replace: { type: 'boolean' }, import: { type: 'boolean' },
-      name: { type: 'string' }, expires: { type: 'string' }, from: { type: 'string' }, 'private-key': { type: 'boolean' },
+      from: { type: 'string' }, 'private-key': { type: 'boolean' },
       'no-key': { type: 'boolean' }, owner: { type: 'string' }, site: { type: 'string' },
       statement: { type: 'boolean' }, 'key-file': { type: 'string' }, 'statement-file': { type: 'string' },
       authorize: { type: 'boolean' }, deadline: { type: 'string' }, out: { type: 'string' },
-      'drop-records': { type: 'boolean' }, reason: { type: 'string' },
+      'drop-records': { type: 'boolean' }, reason: { type: 'string' }, compromised: { type: 'boolean' },
       signer: { type: 'string' }, 'sign-out': { type: 'string' }, signature: { type: 'string' }, 'signature-file': { type: 'string' },
       relayer: { type: 'string' }, 'no-relayer': { type: 'boolean' },
       budget: { type: 'string' }, port: { type: 'string' }, host: { type: 'string' }, 'cache-seconds': { type: 'string' }, file: { type: 'string' }, index: { type: 'string' }, url: { type: 'string' }, 'per-hour': { type: 'string' }, 'free-attests': { type: 'string' }, 'max-gas': { type: 'string' },
@@ -96,7 +204,9 @@ async function main() {
   setJson(!!opts.json)
   if (opts.version) { process.stdout.write(version + '\n'); return }
   const [cmd, ...rest] = positionals
-  if (opts.help || !cmd) { process.stdout.write(HELP); process.exitCode = opts.help ? 0 : EXIT.USAGE; return }  // bare `thurin` is a usage error; `--help` is not
+  if (cmd === 'help') { process.stdout.write(topicHelp(rest[0])); return }
+  if (opts.help) { process.stdout.write(topicHelp(cmd)); return }
+  if (!cmd) { process.stdout.write(HELP); process.exitCode = EXIT.USAGE; return }  // bare `thurin` is a usage error; `--help` is not
 
   switch (cmd) {
     case 'status': return status(rest, opts)
@@ -112,7 +222,7 @@ async function main() {
     case 'keyserver': return keyserver(rest, opts)
     case 'record': return record(rest, opts)
     case 'ens': return ens(rest, opts)
-    default: throw new CliError(`Unknown command "${cmd}". Try: thurin --help`, EXIT.USAGE)
+    default: throw new CliError(`Unknown command "${cmd}". Try: thurin help`, EXIT.USAGE)
   }
 }
 

@@ -41,7 +41,7 @@ If a claim doesn't count, the line says why instead of ✓: `✗ key expired 202
 ## Attest, in three commands
 
 ```bash
-thurin key create "Your Name"            # an Ed25519 key with a published name and no email
+gpg --quick-gen-key "Your Name" ed25519 sign 2y   # a key with a name and no email (gpg makes keys; Thurin never does)
 thurin wallet create identity       # a fresh address; the 12 words are shown once
 thurin attest                       # signs the statement with gpg, checks everything, publishes
 ```
@@ -57,7 +57,9 @@ thurin update-key          # after adding a proof notation to your key: same fin
 thurin reattest            # revoke the current claim and publish a new key in one transaction; its records move with it
 thurin reattest --drop-records               # …or leave the records with the old claim
 thurin revoke              # mark the claim inactive (it stays in chain history)
-thurin revoke --reason compromised           # or retired, superseded, other
+thurin revoke --reason compromised           # final: this address can never claim that key again (or: retired, other)
+thurin revoke 0 --reason compromised         # found out later: mark a claim you already revoked or replaced, once
+thurin reattest --key <new> --compromised    # a stolen key: move to a new one and lock the old, in one transaction
 ```
 
 Adding a proof to a key is one gpg line; see the [GnuPG guide](https://docs.thurin.id/#/guides/gnupg).
@@ -159,7 +161,7 @@ This is the one command that spends unattended. It spends gas only, one transact
 
 ```bash
 thurin key list                      # your keys, which have a published name, how many proofs
-thurin key add-name <fpr> thurin     # give an email-only key a name to publish under
+gpg --quick-add-uid <fpr> "Your Name"  # give an email-only key a name to publish under
 thurin key export <fpr>              # the minimal armored export
 thurin key fetch bendoubleu.eth      # the key stored on-chain for an identity; --import puts it in your keyring
 thurin key default <fpr>
@@ -179,7 +181,7 @@ Keystores are the same format `cast`, geth, and every wallet import. `--password
 
 ## Networks
 
-`--network mainnet|sepolia|local` (local = a running anvil), `--rpc <url>` for your own node. Defaults live in `~/.config/thurin/config.json`. The registry (PGPRegistry v3) is at `0x4f2d70799cAAD651C7c564426AA74A842c1331B6` on every network.
+`--network mainnet|sepolia|local` (local = a running anvil), `--rpc <url>` for your own node. Defaults live in `~/.config/thurin/config.json`. The registry (PGPRegistry v3) is at `0x0D9beb4178BB81f123d8b68cc4BB58dc538b9203` on Ethereum mainnet and Sepolia.
 
 ## What's next
 

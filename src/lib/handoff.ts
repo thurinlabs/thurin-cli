@@ -13,7 +13,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { stringToHex, type Address, type Hex } from 'viem'
 import {
-  fingerprintToBytes, attestTypedData, reattestTypedData, updateKeyTypedData, revokeTypedData, setRecordTypedData, REVOKE_REASONS,
+  fingerprintToBytes, attestTypedData, reattestTypedData, updateKeyTypedData, revokeTypedData, setRecordTypedData, OWNER_REVOKE_REASONS,
   type RevokeReason,
 } from '@thurinlabs/identity-kit/core'
 
@@ -55,19 +55,37 @@ export interface Handoff {
 export const HANDOFF_PARAM = 'handoff'
 export const FOR_FN: Record<HandoffOp, string> = { attest: 'attestFor', reattest: 'reattestFor', 'update-key': 'updateKeyFor', revoke: 'revokeFor', 'set-record': 'setRecordFor' }
 
+/**
+ * The link's fragment: `<base64url JSON>[.<base64url key>[.<base64url signature>]]`. The key and
+ * signature ride as their own raw bytes, not as hex inside the JSON: half the length. A signature part
+ * starting with '-' is a clearsigned message (text); anything else is a raw signature packet.
+ */
 export function encodeHandoff(h: Handoff): string {
-  return Buffer.from(JSON.stringify(h), 'utf8').toString('base64url')
+  const { key, signature, ...rest } = h
+  const parts = [b64(Buffer.from(JSON.stringify(rest), 'utf8'))]
+  if (key) parts.push(b64(payloadBuffer(key)))
+  if (signature) parts.push(b64(payloadBuffer(signature)))
+  return parts.join('.')
 }
+
+const b64 = (b: Buffer) => b.toString('base64url')
+/** 0x hex → its bytes; text (a clearsigned message) → its UTF-8 bytes. */
+const payloadBuffer = (v: string) => (/^0x([0-9a-fA-F]{2})+$/.test(v) ? Buffer.from(v.slice(2), 'hex') : Buffer.from(v, 'utf8'))
+/** Bytes back to what the handoff carries: text if they start with '-', else 0x hex. */
+const payloadValue = (b: Buffer) => (b[0] === 0x2d ? b.toString('utf8') : `0x${b.toString('hex')}`)
 
 export function decodeHandoff(encoded: string): Handoff {
   let h: any
-  try { h = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) } catch { throw new Error('Not a Thurin hand-off') }
+  const [json, keyPart, sigPart] = encoded.split('.')
+  try { h = JSON.parse(Buffer.from(json, 'base64url').toString('utf8')) } catch { throw new Error('Not a Thurin hand-off') }
+  if (h && keyPart) h.key = payloadValue(Buffer.from(keyPart, 'base64url'))
+  if (h && sigPart) h.signature = payloadValue(Buffer.from(sigPart, 'base64url'))
   if (h?.v === 1) throw new Error('This is a format 1 hand-off (registry v2); make a new one')
   if (h?.v !== 2 || !OPS.includes(h.op)) throw new Error('Not a Thurin hand-off')
   if (!/^0x[0-9a-f]{40}$/.test(h.owner || '')) throw new Error('Hand-off has no valid owner')
   if (h.op !== 'attest' && !Number.isInteger(h.index)) throw new Error('Hand-off names no claim index')
   if (h.op !== 'revoke' && h.op !== 'set-record' && !isHex(h.key)) throw new Error('Hand-off carries no key')
-  if (h.reason != null && !(REVOKE_REASONS as readonly string[]).includes(h.reason)) throw new Error(`Unknown revoke reason "${h.reason}"`)
+  if (h.reason != null && !(OWNER_REVOKE_REASONS as readonly string[]).includes(h.reason)) throw new Error(`Unknown revoke reason "${h.reason}"`)
   if (h.keepRecords != null && typeof h.keepRecords !== 'boolean') throw new Error('Hand-off has an invalid keepRecords')
   if (h.op === 'set-record' && (typeof h.kind !== 'string' || typeof h.value !== 'string')) throw new Error('Hand-off names no record')
   if ((h.op === 'attest' || h.op === 'reattest') && typeof h.signature !== 'string') throw new Error('Hand-off carries no signature')
@@ -85,13 +103,13 @@ export function handoffUrl(site: string, h: Handoff): string {
 
 /** A hand-off from wherever the user has it: a link, a JSON file, or the bare fragment value. */
 export function readHandoffInput(input: string): Handoff {
-  const m = input.trim().match(/#handoff=([A-Za-z0-9_-]+)$/)
+  const m = input.trim().match(/#handoff=([A-Za-z0-9_.-]+)$/)
   if (m) return decodeHandoff(m[1])
   if (existsSync(input)) {
     const h = JSON.parse(readFileSync(input, 'utf8'))
     return decodeHandoff(encodeHandoff(h))   // same validation as the link
   }
-  if (/^[A-Za-z0-9_-]+$/.test(input.trim())) return decodeHandoff(input.trim())
+  if (/^[A-Za-z0-9_.-]+$/.test(input.trim())) return decodeHandoff(input.trim())
   throw new Error(`"${input}" is not a hand-off link, file, or fragment`)
 }
 

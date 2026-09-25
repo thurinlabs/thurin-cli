@@ -1,15 +1,16 @@
-import { toHex, isAddress, getAddress, recoverTypedDataAddress, type Address } from 'viem'
+import { toHex, encodeFunctionData, isAddress, getAddress, recoverTypedDataAddress, type Address } from 'viem'
 import { writeFileSync, readFileSync } from 'node:fs'
 import { normalize } from 'viem/ens'
 import {
-  REGISTRY_ABI, parsePgpKey, verifyAttestation, leanKey, claimSignature, identifyProof, fingerprintToBytes, REVOKE_REASONS,
+  REGISTRY_ABI, parsePgpKey, verifyAttestation, leanKey, claimSignature, identifyProof, fingerprintToBytes, OWNER_REVOKE_REASONS,
   type RevokeReason,
 } from '@thurinlabs/identity-kit/core'
-import { chainCtx, claimsOf, type ChainCtx } from '../lib/chain.js'
-import { findKey, detachSign, exportMinimal, attestStatement } from '../lib/gpg.js'
+import { chainCtx, claimsOf, readRegistry, type ChainCtx } from '../lib/chain.js'
+import { findKey, detachSign, exportMinimal, attestStatement, MAKE_KEY_HINT, addNameHint } from '../lib/gpg.js'
 import { loadAccount } from '../lib/keystore.js'
 import { accountSigner, commandSigner, fileSigner, providedSigner, readSignatureFile, readSignOut, SignLater, type Signer } from '../lib/signer.js'
 import { prompt, confirm } from '../lib/prompt.js'
+import { offerToOpen } from '../lib/open.js'
 import { readConfig } from '../lib/config.js'
 import { out, info, ok, bad, dim, bold, label, isJson, CliError, EXIT } from '../lib/output.js'
 import {
@@ -60,7 +61,7 @@ const byteLength = (v: string | Uint8Array) => typeof v === 'string' ? new TextE
 export async function preflight(ctx: ChainCtx, owner: Address, fpr: string, includeEmail: boolean, needSignature: boolean, source: PresignedInputs | null = null) {
   const full = source ? source.key : await exportMinimal(fpr)
   const lean = await leanKey(full, { includeEmail })
-  if (!lean) throw new CliError(`Every name on ${fpr} contains an email. Add one without: thurin key add-name ${fpr} thurin — or pass --include-email`, EXIT.FAILED)
+  if (!lean) throw new CliError(`Every name on ${fpr} contains an email. Add one without: ${addNameHint(fpr)} — or pass --include-email`, EXIT.FAILED)
   const info_ = await parsePgpKey(lean.binary)
   if (!info_) throw new CliError('Exported key does not parse', EXIT.FAILED)
   if (info_.fingerprint.toUpperCase() !== fpr.toUpperCase()) throw new CliError('Exported key fingerprint does not match', EXIT.FAILED)
@@ -74,7 +75,7 @@ export async function preflight(ctx: ChainCtx, owner: Address, fpr: string, incl
       if (!source.signature) throw new CliError(`The signature is needed too: --statement-file <sig>. The line to sign: thurin attest --statement --owner ${owner}`, EXIT.USAGE)
       raw = source.signature
     } else {
-      info(`Signing "${attestStatement(owner)}" with ${fpr} (gpg will ask for the passphrase).`)
+      info(`Signing "${attestStatement(owner)}" with ${fpr} (gpg may ask for your passphrase).`)
       raw = await detachSign(fpr, attestStatement(owner))
     }
     const cs = await claimSignature({ signature: raw, key: lean.binary, address: owner })
@@ -101,7 +102,7 @@ export async function send(ctx: ChainCtx, opts: Record<string, any>, functionNam
   const gas = await ctx.client.estimateContractGas({ address: to.address, abi: to.abi, functionName, args, account } as any).catch((e: any) => { throw new CliError(`${what} would revert: ${e.shortMessage || e.message}`, EXIT.CHAIN) })
   const price = await ctx.client.getGasPrice()
   const eth = Number(gas * price) / 1e18
-  if (!opts.yes && !isJson() && !(await confirm(`${what} from ${account.address} on ${ctx.network} (~${gas} gas, ~${eth.toFixed(6)} ETH). Send?`))) throw new CliError('Cancelled', EXIT.USAGE)
+  if (!opts.yes && !isJson() && !(await confirm(`${what.replace(/\.$/, '')}.\n${dim(`From ${account.address} on ${ctx.network} · ~${gas.toLocaleString('en-US')} gas · ~${eth.toFixed(6)} ETH.`)} Send?`))) throw new CliError('Cancelled', EXIT.USAGE)
   const hash = await wallet.writeContract({ address: to.address, abi: to.abi, functionName, args, account, chain: ctx.client.chain } as any)
   info(`Sent ${hash}. Waiting for confirmation…`)
   const receipt = await ctx.client.waitForTransactionReceipt({ hash })
@@ -109,7 +110,10 @@ export async function send(ctx: ChainCtx, opts: Record<string, any>, functionNam
   return { hash, block: receipt.blockNumber, gasUsed: receipt.gasUsed, account: account.address }
 }
 
-function identityUrl(ctx: ChainCtx, owner: Address) { return `https://thurin.id/eth/${owner}` }
+/** The identity page for this network, or null when there's no site for it (e.g. local without --site). */
+function identityUrl(ctx: ChainCtx, owner: Address) { return ctx.site ? `${ctx.site}/eth/${owner}` : null }
+/** The "identity" line of a result, or nothing when there's no page to link. */
+function identityLine(ctx: ChainCtx, owner: Address) { const u = identityUrl(ctx, owner); return u ? `\n${label('identity')}${u}` : '' }
 function txUrl(ctx: ChainCtx, hash: string) { return ctx.explorerUrl ? `${ctx.explorerUrl}/tx/${hash}` : hash }
 
 export async function ownerFor(ctx: ChainCtx, opts: Record<string, any>): Promise<Address> {
@@ -194,13 +198,14 @@ function buildHandoff(ctx: ChainCtx, opts: Record<string, any>, op: HandoffOp, o
 
 function siteFor(opts: Record<string, any>): string { return opts.site || readConfig().site || 'https://thurin.id' }
 
-export function handoff(ctx: ChainCtx, opts: Record<string, any>, op: HandoffOp, owner: Address, fpr: string, p: Preflight | null, index?: number) {
+export async function handoff(ctx: ChainCtx, opts: Record<string, any>, op: HandoffOp, owner: Address, fpr: string, p: Preflight | null, index?: number) {
   const h = buildHandoff(ctx, opts, op, owner, fpr, p, index)
   const url = handoffUrl(siteFor(opts), h)
   if (ctx.network !== 'mainnet' && !opts.site) info(`thurin.id runs mainnet; for ${ctx.network} open this on a ${ctx.network} build (--site http://localhost:5173).`)
   out({ handoff: true, op, owner, fingerprint: fpr, network: ctx.network, index, proofs: p?.proofs, url }, () =>
     `${ok('Ready to publish')} ${bold(fpr)} for ${owner}${index !== undefined ? ` (claim #${index})` : ''}\n` +
     `Open this link where that wallet is (the part after # never leaves your browser) and confirm:\n\n${url}\n`)
+  await offerToOpen(url, isJson())
 }
 
 /**
@@ -222,7 +227,7 @@ export async function authorize(ctx: ChainCtx, opts: Record<string, any>, op: Ha
   const h = h0
   h.authorization = { nonce, deadline, signature: '0x' }
   const typed = typedDataFor(h, ctx.client.chain!.id, ctx.registry)
-  if (externalSigner(opts)) info(`Signing with ${signer.describe}`)
+  if (externalSigner(opts) && !opts.signOut) info(`Signing with ${signer.describe}`)   // --sign-out says where it wrote the file
   try { h.authorization.signature = await signer.signTypedData(typed) }
   catch (e) {
     if (e instanceof SignLater) {
@@ -261,13 +266,14 @@ async function emitAuthorized(ctx: ChainCtx, opts: Record<string, any>, h: Hando
     info(`Sending to ${relayer}…`)
     const r = await postToRelayer(relayer, h)
     out({ authorized: true, relayed: true, op, owner, fingerprint: fpr, network: ctx.network, index, nonce, ...r, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
-      `${ok('Published')} ${op}${index !== undefined ? ` #${index}` : ''} for ${owner} via ${relayer}\n${label('tx')}${txUrl(ctx, r.hash)}\n${label('identity')}${identityUrl(ctx, owner)}`)
+      `${ok('Published')} ${op}${index !== undefined ? ` #${index}` : ''} for ${owner} via ${relayer}\n${label('tx')}${txUrl(ctx, r.hash)}${identityLine(ctx, owner)}`)
     return
   }
   const url = handoffUrl(siteFor(opts), h)
   if (ctx.network !== 'mainnet' && !opts.site) info(`thurin.id runs mainnet; for ${ctx.network} open this on a ${ctx.network} build (--site http://localhost:5173).`)
   out({ authorized: true, op, owner, fingerprint: fpr, network: ctx.network, index, nonce, deadline, url }, () =>
     `${head}Open this link where a funded wallet is, or send it to whoever is paying:\n\n${url}\n`)
+  await offerToOpen(url, isJson())
 }
 
 /** POST the authorization to a relayer (`thurin relay`); it runs the same checks and pays. */
@@ -325,7 +331,7 @@ export async function submit(args: string[], opts: Record<string, any>) {
     `${label('checks')}${ok('signed by owner')} · ${ok('nonce matches')}${h.signature ? ` · ${ok('PGP verified')}` : ''} · expires in ${describeDeadline(a.deadline)}\n`)
   const r = await send(ctx, opts, FOR_FN[h.op], forArgsOf(h), `Publish ${h.op} for ${owner}`)
   out({ ...r, owner, op: h.op, index: h.index, fingerprint: h.fingerprint, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
-    `${ok('Published')} ${h.op} for ${owner}\n${label('tx')}${txUrl(ctx, r.hash)}\n${label('identity')}${identityUrl(ctx, owner)}`)
+    `${ok('Published')} ${h.op} for ${owner}\n${label('tx')}${txUrl(ctx, r.hash)}${identityLine(ctx, owner)}`)
 }
 
 /**
@@ -352,6 +358,7 @@ export async function attest(_args: string[], opts: Record<string, any>) {
   const pre = presignedInputs(opts)
   const fpr = await keyFor(opts, pre)
   const owner = pre ? await presignedOwner(ctx, opts) : await ownerFor(ctx, opts)
+  await checkKeyClaimable(ctx, owner, fpr)
   const existing = (await claimsOf(ctx, owner)).filter(c => !c.revokedAt)
   const dup = existing.find(c => c.fingerprint === fpr)
   if (dup && !opts.replace) throw new CliError(`${owner} already has an active claim for ${fpr} (#${dup.index}). Use thurin reattest ${dup.index}, or thurin update-key ${dup.index} to change its key.`, EXIT.FAILED)
@@ -361,7 +368,7 @@ export async function attest(_args: string[], opts: Record<string, any>) {
   if (opts.noKey) return handoff(ctx, opts, 'attest', owner, fpr, p)
   const r = await send(ctx, opts, 'attest', [fingerprintToBytes(fpr), payloadArg(p.signature!), p.key], 'Publish claim')
   out({ ...r, owner, fingerprint: fpr, proofs: p.proofs, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
-    `${ok('Published')} ${bold(fpr)} for ${owner}\n${label('tx')}${txUrl(ctx, r.hash)}\n${label('identity')}${identityUrl(ctx, owner)}`)
+    `${ok('Published')} ${bold(fpr)} for ${owner}\n${label('tx')}${txUrl(ctx, r.hash)}${identityLine(ctx, owner)}`)
 }
 
 export async function updateKey(args: string[], opts: Record<string, any>) {
@@ -381,7 +388,7 @@ export async function updateKey(args: string[], opts: Record<string, any>) {
   if (opts.noKey) return handoff(ctx, { ...opts, includeEmail }, 'update-key', owner, c.fingerprint, p, idx)
   const r = await send(ctx, opts, 'updateKey', [BigInt(idx), p.key], `Update key on claim #${idx}`)
   out({ ...r, owner, index: idx, proofs: p.proofs, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
-    `${ok('Updated')} claim #${idx}: ${p.proofs} proofs\n${label('tx')}${txUrl(ctx, r.hash)}\n${label('identity')}${identityUrl(ctx, owner)}`)
+    `${ok('Updated')} claim #${idx}: ${p.proofs} proofs\n${label('tx')}${txUrl(ctx, r.hash)}${identityLine(ctx, owner)}`)
 }
 
 export async function reattest(args: string[], opts: Record<string, any>) {
@@ -392,13 +399,28 @@ export async function reattest(args: string[], opts: Record<string, any>) {
   const claims = await claimsOf(ctx, owner)
   const idx = pickIndex(args[0], claims)
   if (claims[idx].revokedAt) throw new CliError(`Claim #${idx} is already revoked`, EXIT.FAILED)
+  await checkKeyClaimable(ctx, owner, fpr)
+  // A canary moving to a claim with a different key was signed by the old one: say so, as the site does.
+  if (!opts.dropRecords && claims[idx].fingerprint !== fpr) {
+    const [names] = await readRegistry<[string[], string[]]>(ctx, 'recordsOf', [owner, BigInt(idx)])
+    if (names.includes('thurin.canary')) info(`Your canary was signed by the old key. After this, set a new one signed with ${fpr}.`)
+  }
   const p = await preflight(ctx, owner, fpr, !!opts.includeEmail, true, pre)
   if (!isJson()) process.stderr.write(summary(p) + '\n')
+  if (opts.compromised && (opts.authorize || opts.noKey)) throw new CliError('--compromised sends two calls in one transaction from this keystore; with --authorize or --no-key, reattest first, then: thurin revoke <old index> --reason compromised', EXIT.USAGE)
   if (opts.authorize) return authorize(ctx, opts, 'reattest', owner, fpr, p, idx)
   if (opts.noKey) return handoff(ctx, opts, 'reattest', owner, fpr, p, idx)
-  const r = await send(ctx, opts, 'reattest', [BigInt(idx), fingerprintToBytes(fpr), payloadArg(p.signature!), p.key, !opts.dropRecords], `Revoke #${idx} and publish a new claim${opts.dropRecords ? '' : ' (its records move to the new one)'}`)
+  if (opts.compromised && claims[idx].fingerprint === fpr) throw new CliError('--compromised needs a different key: the old key would stay in use', EXIT.USAGE)
+  const reattestArgs = [BigInt(idx), fingerprintToBytes(fpr), payloadArg(p.signature!), p.key, !opts.dropRecords] as const
+  const what = `Revoke #${idx} and publish a new claim${opts.dropRecords ? '' : ' (its records move to the new one)'}${opts.compromised ? `; mark ${claims[idx].fingerprint} compromised (this address can never claim it again)` : ''}`
+  const r = opts.compromised
+    ? await send(ctx, opts, 'multicall', [[
+        encodeFunctionData({ abi: REGISTRY_ABI, functionName: 'reattest', args: reattestArgs }),
+        encodeFunctionData({ abi: REGISTRY_ABI, functionName: 'revoke', args: [BigInt(idx), 'compromised'] }),
+      ]], what)
+    : await send(ctx, opts, 'reattest', [...reattestArgs], what)
   out({ ...r, owner, revoked: idx, fingerprint: fpr, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
-    `${ok('Replaced')} claim #${idx} with ${bold(fpr)}\n${label('tx')}${txUrl(ctx, r.hash)}\n${label('identity')}${identityUrl(ctx, owner)}`)
+    `${ok('Replaced')} claim #${idx} with ${bold(fpr)}\n${label('tx')}${txUrl(ctx, r.hash)}${identityLine(ctx, owner)}`)
 }
 
 export async function revoke(args: string[], opts: Record<string, any>) {
@@ -406,18 +428,31 @@ export async function revoke(args: string[], opts: Record<string, any>) {
   if (opts.noKey) throw new CliError('revoke has nothing to sign; do it from Your claims on thurin.id/attest, or use --authorize', EXIT.USAGE)
   const owner = await ownerFor(ctx, opts)
   const claims = await claimsOf(ctx, owner)
-  const idx = pickIndex(args[0], claims)
-  if (claims[idx].revokedAt) throw new CliError(`Claim #${idx} is already revoked`, EXIT.FAILED)
   const reason = revokeReason(opts)
-  if (opts.authorize) return authorize(ctx, opts, 'revoke', owner, claims[idx].fingerprint, null, idx)
-  const r = await send(ctx, opts, 'revoke', [BigInt(idx), reason], `Revoke claim #${idx} (${claims[idx].fingerprint})${reason ? ` as ${reason}` : ''}`)
-  out({ ...r, owner, index: idx, tx: txUrl(ctx, r.hash) }, () => `${bad('Revoked')} claim #${idx}\n${label('tx')}${txUrl(ctx, r.hash)}`)
+  const idx = pickIndex(args[0], claims)
+  const c = claims[idx]
+  // A claim already revoked or replaced can still be marked compromised later, once.
+  const late = !!c.revokedAt
+  if (late && reason !== 'compromised') throw new CliError(`Claim #${idx} is already revoked. Found out its key was compromised? thurin revoke ${idx} --reason compromised`, EXIT.FAILED)
+  if (late && c.revokeReason === 'compromised') throw new CliError(`Claim #${idx} is already marked compromised`, EXIT.FAILED)
+  if (late && claims.some(o => !o.revokedAt && o.fingerprint === c.fingerprint)) throw new CliError(`${c.fingerprint} still has an active claim here; revoke that one as compromised first`, EXIT.FAILED)
+  if (opts.authorize) return authorize(ctx, opts, 'revoke', owner, c.fingerprint, null, idx)
+  const what = late ? `Mark claim #${idx}'s key (${c.fingerprint}) as compromised; this address can never claim it again` : `Revoke claim #${idx} (${c.fingerprint})${reason ? ` as ${reason}` : ''}${reason === 'compromised' ? '; this address can never claim it again' : ''}`
+  const r = await send(ctx, opts, 'revoke', [BigInt(idx), reason], what)
+  out({ ...r, owner, index: idx, reason, markedLater: late, tx: txUrl(ctx, r.hash) }, () => `${late ? `${bad('Marked')} claim #${idx}'s key compromised` : `${bad('Revoked')} claim #${idx}${reason ? ` (${reason})` : ''}`}\n${label('tx')}${txUrl(ctx, r.hash)}`)
 }
 
-/** --reason for revoke: compromised, retired, superseded, other, or none. */
+/** After "compromised" an address can never claim that key again; say so before gpg is asked to sign. */
+async function checkKeyClaimable(ctx: ChainCtx, owner: Address, fpr: string) {
+  const status = await readRegistry<string>(ctx, 'keyStatus', [owner, fingerprintToBytes(fpr)])
+  if (status === 'compromised') throw new CliError(`${owner} revoked ${fpr} as compromised, so it can't claim that key again. Use a new key. ${MAKE_KEY_HINT}`, EXIT.FAILED)
+  if (status === 'revoked') info(`${owner} revoked ${fpr} before; this makes a new claim and the old one stays revoked.`)
+}
+
+/** --reason for revoke: compromised, retired, other, or none ("superseded" is set only by reattest). */
 function revokeReason(opts: Record<string, any>): RevokeReason {
   const r = String(opts.reason ?? '').toLowerCase()
-  if (!(REVOKE_REASONS as readonly string[]).includes(r)) throw new CliError(`--reason must be one of: ${REVOKE_REASONS.filter(Boolean).join(', ')}`, EXIT.USAGE)
+  if (!(OWNER_REVOKE_REASONS as readonly string[]).includes(r)) throw new CliError(`--reason must be one of: ${OWNER_REVOKE_REASONS.filter(Boolean).join(', ')}`, EXIT.USAGE)
   return r as RevokeReason
 }
 

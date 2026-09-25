@@ -1,19 +1,19 @@
-import { listKeys, findKey, exportMinimal, quickGenKey, quickAddUid, importKey, type KeyListing } from '../lib/gpg.js'
+import { listKeys, findKey, exportMinimal, importKey, MAKE_KEY_HINT, addNameHint, type KeyListing } from '../lib/gpg.js'
 import { parsePgpKey, identifyProof, hasEmailUserID } from '@thurinlabs/identity-kit/core'
 import { chainCtx, claimsOf, detectLookup, resolveOwners } from '../lib/chain.js'
 import { readConfig, writeConfig } from '../lib/config.js'
-import { out, ok, bad, dim, bold, label, info, CliError, EXIT } from '../lib/output.js'
+import { out, ok, bad, dim, bold, info, CliError, EXIT } from '../lib/output.js'
 
 export async function key(args: string[], opts: Record<string, any>) {
   const sub = args[0]
   switch (sub) {
     case 'list': return keyList()
-    case 'create': return keyCreate(args.slice(1), opts)
-    case 'add-name': return keyAddName(args.slice(1))
+    case 'create': throw new CliError(`Thurin doesn't make keys; gpg does. ${MAKE_KEY_HINT}`, EXIT.USAGE)
+    case 'add-name': throw new CliError(`Add a name with gpg: ${addNameHint(args[1] || '<fingerprint>')}`, EXIT.USAGE)
     case 'export': return keyExport(args.slice(1))
     case 'fetch': return keyFetch(args.slice(1), opts)
     case 'default': return keyDefault(args.slice(1))
-    default: throw new CliError('Usage: thurin key <list|create|add-name|export|fetch|default> …', EXIT.USAGE)
+    default: throw new CliError('Usage: thurin key <list|export|fetch|default> …', EXIT.USAGE)
   }
 }
 
@@ -30,28 +30,8 @@ async function keyList() {
   out(rows, () => rows.length ? rows.map(k =>
     `${k.isDefault ? ok('*') : ' '} ${bold(k.fingerprint)}  ${k.algorithm} · ${k.created}${k.expires ? ` → ${k.expires}` : ''}\n` +
     k.userIDs.map(u => `    ${u.includes('@') ? dim(u) : u}`).join('\n') + '\n' +
-    `    ${k.publishedName ? ok('published name: ' + k.publishedName) : bad('no name without an email (thurin key add-name)')} · ${k.hasEncryptionSubkey ? 'encrypt ✓' : dim('no encryption subkey')} · proofs: ${k.proofs}`
-  ).join('\n') : dim('No secret keys in your gpg keyring. `thurin key create` makes one.'))
-}
-
-async function keyCreate(args: string[], opts: Record<string, any>) {
-  const name = opts.name || args[0]
-  if (!name) throw new CliError('Usage: thurin key create <name> [--expires 2y]  (a name with no email, e.g. "Your Name")', EXIT.USAGE)
-  const expires = opts.expires || '2y'
-  info(`Creating an Ed25519 key "${name}" (certify + sign, Cv25519 encryption subkey, expires ${expires}). gpg will ask for a passphrase.`)
-  const fpr = await quickGenKey(name, expires)
-  const cfg = readConfig(); if (!cfg.key) { cfg.key = fpr; writeConfig(cfg) }
-  out({ fingerprint: fpr, name, expires, default: cfg.key === fpr }, () =>
-    `${ok('Created')} ${bold(fpr)}\n${label('name')}${name}\n${label('backup')}gpg --export-secret-keys --armor ${fpr} > ${name}-secret.asc   ${dim('(keep it offline; the CLI never reads it)')}\n${label('next')}thurin attest --key ${fpr}`)
-}
-
-async function keyAddName(args: string[]) {
-  const [fprOrName, name] = args
-  if (!fprOrName || !name) throw new CliError('Usage: thurin key add-name <fingerprint> <name>', EXIT.USAGE)
-  if (name.includes('@')) throw new CliError('The published name must not contain an email address', EXIT.USAGE)
-  const k = await findKey(fprOrName)
-  await quickAddUid(k.fingerprint, name)
-  out({ fingerprint: k.fingerprint, added: name }, () => `${ok('Added')} "${name}" to ${k.fingerprint}`)
+    `    ${k.publishedName ? ok('published name: ' + k.publishedName) : bad(`no name without an email (${addNameHint(k.fingerprint)})`)} · ${k.hasEncryptionSubkey ? 'encrypt ✓' : dim('no encryption subkey')} · proofs: ${k.proofs}`
+  ).join('\n') : dim(`No secret keys in your gpg keyring. ${MAKE_KEY_HINT}`))
 }
 
 async function keyExport(args: string[]) {
