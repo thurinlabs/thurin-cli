@@ -79,7 +79,7 @@ export async function readRegistry<T>(ctx: ChainCtx, functionName: string, args:
   try {
     return await ctx.client.readContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName, args } as any) as T
   } catch (err: any) {
-    throw new CliError(`Registry read failed (${functionName}) on ${ctx.network} via ${ctx.rpcUrl}: ${err.shortMessage || err.message}`, EXIT.CHAIN)
+    throw new CliError(`Registry read failed (${functionName}) on ${ctx.network} via ${rpcHost(ctx.rpcUrl)}: ${err.shortMessage || err.message}`, EXIT.CHAIN)
   }
 }
 
@@ -101,7 +101,7 @@ export async function resolveOwners(ctx: ChainCtx, lookup: Lookup): Promise<{ ow
     if (ctx.network !== 'mainnet') throw new CliError(`ENS names resolve on mainnet only; use the address on ${ctx.network}`, EXIT.USAGE)
     let addr: Address | null
     try { addr = await ctx.client.getEnsAddress({ name: normalize(lookup.value) }) }
-    catch (err: any) { throw new CliError(`ENS lookup failed via ${ctx.rpcUrl}: ${err.shortMessage || err.message} (try --rpc <url>)`, EXIT.CHAIN) }
+    catch (err: any) { throw new CliError(`ENS lookup failed via ${rpcHost(ctx.rpcUrl)}: ${err.shortMessage || err.message} (try --rpc <url>)`, EXIT.CHAIN) }
     if (!addr) throw new CliError(`${lookup.value} does not resolve to an address`, EXIT.FAILED)
     return { owners: [addr], ensName: lookup.value }
   }
@@ -123,4 +123,9 @@ export async function resolveOwners(ctx: ChainCtx, lookup: Lookup): Promise<{ ow
 export async function ensNameOf(ctx: ChainCtx, address: Address): Promise<string | null> {
   if (ctx.network !== 'mainnet') return null
   return ctx.client.getEnsName({ address }).catch(() => null)   // cosmetic: a failure here just hides the name
+}
+
+/** Just the host of an RPC URL, for messages: providers put API keys in the path or query. */
+export function rpcHost(url: string): string {
+  try { return new URL(url).host } catch { return 'the RPC' }
 }

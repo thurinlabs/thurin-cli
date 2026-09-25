@@ -104,10 +104,14 @@ export async function signingKeyFor(fingerprint: string): Promise<string> {
   throw new CliError(`Key ${fingerprint} has no usable signing key (primary is certify-only and no signing subkey)`, EXIT.FAILED)
 }
 
-/** A raw detached text-mode signature over exactly `text` (no trailing line break), as a claim stores it. */
+/**
+ * A raw detached text-mode signature over exactly `text` (no trailing line break), as a claim stores it.
+ * --disable-signer-uid: otherwise gpg can write an email into the signature (a `sender` line in gpg.conf),
+ * and the signature goes on-chain for good.
+ */
 export async function detachSign(fingerprint: string, text: string): Promise<Uint8Array> {
   const signer = await signingKeyFor(fingerprint)
-  return new Uint8Array(await gpgBytes(['--detach-sign', '--textmode', '-u', signer], text))
+  return new Uint8Array(await gpgBytes(['--detach-sign', '--textmode', '--disable-signer-uid', '-u', signer], text))
 }
 
 export async function exportMinimal(fingerprint: string): Promise<string> {

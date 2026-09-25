@@ -55,7 +55,7 @@ export function fileSigner(outPath: string, handoff: unknown): Signer {
     signTypedData: async typed => {
       // The whole unsigned hand-off rides along: the PGP signature inside it carries a timestamp,
       // so the finishing step must reuse these exact bytes rather than sign again.
-      writeFileSync(outPath, JSON.stringify({ typedData: typed, handoff }, bigintReplacer, 2) + '\n')
+      writeFileSync(outPath, JSON.stringify({ typedData: typed, handoff }, bigintReplacer, 2) + '\n', { mode: 0o600 })
       throw new SignLater(outPath)
     },
   }

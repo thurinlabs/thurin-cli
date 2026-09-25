@@ -45,7 +45,7 @@ export async function relay(_args: string[], opts: Record<string, any>) {
   let chain: Promise<unknown> = Promise.resolve()
   const serial = <T,>(fn: () => Promise<T>) => { const p = chain.then(fn, fn); chain = p.catch(() => {}); return p }
 
-  const server = createServer((req, res) => handle(req, res).catch(e => reply(res, 500, { error: e.message })))
+  const server = createServer((req, res) => handle(req, res).catch(e => { process.stdout.write(`${new Date().toISOString()} error ${e.name}\n`); reply(res, 500, { error: 'The relay hit an error; try again' }) }))
   async function handle(req: IncomingMessage, res: ServerResponse) {
     res.setHeader('access-control-allow-origin', '*')
     res.setHeader('access-control-allow-headers', 'content-type')
@@ -81,7 +81,7 @@ export async function relay(_args: string[], opts: Record<string, any>) {
       reply(res, 200, result)
     } catch (e: any) {
       const status = e instanceof LimitError ? e.status : e instanceof CliError ? (e.code === EXIT.CHAIN ? 502 : 400) : 500
-      log(h, `refused ${status}: ${e.message}`)
+      log(h, `refused ${status}`)
       reply(res, status, { error: e.message })
     }
   }
@@ -105,9 +105,11 @@ function callerKey(req: IncomingMessage): string {
   return createHash('sha256').update(SALT).update(clientIp(req)).digest('hex').slice(0, 16)
 }
 
-// Op, owner, and tx are public on-chain; the caller's IP is not logged.
+// A success logs op, owner, and tx, all public on-chain. A refusal never reached the chain, so
+// it logs the op and status only: not who tried. The caller's IP is never logged.
 function log(h: Handoff, msg: string) {
-  process.stdout.write(`${new Date().toISOString()} ${h.op} ${h.owner} ${msg}\n`)
+  const who = msg.startsWith('ok ') ? ` ${h.owner}` : ''
+  process.stdout.write(`${new Date().toISOString()} ${h.op}${who} ${msg}\n`)
 }
 
 function reply(res: ServerResponse, status: number, body: unknown) {

@@ -24,6 +24,8 @@ describe('relayer limits', () => {
     expect(() => l.check('ip', '0x3', 'revoke', 1n, 0)).toThrow(LimitError)
     t = 3_600_001
     expect(() => l.check('ip', '0x3', 'revoke', 1n, 0)).not.toThrow()
+    l.record('other', '0x4', 'revoke', 0)
+    expect((l as any).callers.has('ip')).toBe(false)   // not just allowed again: gone from memory
   })
   it('stops at the daily budget and resets after 24 h', () => {
     let t = 0

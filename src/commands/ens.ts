@@ -1,6 +1,6 @@
 import { encodeFunctionData, getAddress, isAddress, type Address } from 'viem'
 import { normalize } from 'viem/ens'
-import { chainCtx, claimsOf, type ChainCtx, type Claim } from '../lib/chain.js'
+import { chainCtx, claimsOf, rpcHost, type ChainCtx, type Claim } from '../lib/chain.js'
 import { ENS_HINT_KEY, ensHintFor, ensHintWrite, type EnsHint } from '@thurinlabs/identity-kit/core'
 import { send } from './attest.js'
 import { out, info, ok, bad, dim, bold, label, isJson, CliError, EXIT } from '../lib/output.js'
@@ -23,7 +23,7 @@ async function resolveName(ctx: ChainCtx, name: string): Promise<{ name: string;
   if (!name || isAddress(name) || !name.includes('.')) throw new CliError(`Give an ENS name, not "${name || ''}"`, EXIT.USAGE)
   let normalized: string
   try { normalized = normalize(name) } catch { throw new CliError(`Not a valid ENS name: ${name}`, EXIT.USAGE) }
-  const address = await ctx.client.getEnsAddress({ name: normalized }).catch((e: any) => { throw new CliError(`ENS lookup failed via ${ctx.rpcUrl}: ${e.shortMessage || e.message}`, EXIT.CHAIN) })
+  const address = await ctx.client.getEnsAddress({ name: normalized }).catch((e: any) => { throw new CliError(`ENS lookup failed via ${rpcHost(ctx.rpcUrl)}: ${e.shortMessage || e.message}`, EXIT.CHAIN) })
   if (!address) throw new CliError(`${normalized} does not resolve to an address`, EXIT.FAILED)
   return { name: normalized, address: getAddress(address) }
 }

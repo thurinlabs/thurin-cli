@@ -48,7 +48,10 @@ export class Limits {
 
   /** Record a request that was sent (whatever it ends up costing). */
   record(caller: string, owner: string, op: string, eth: number) {
-    this.callers.set(caller, [...(this.callers.get(caller) || []), this.now()])
+    // Callers seen only more than an hour ago are forgotten: the hourly limit is all they're for.
+    const cutoff = this.now() - 3_600_000
+    for (const [k, ts] of this.callers) if (!ts.some(t => t > cutoff)) this.callers.delete(k)
+    this.callers.set(caller, [...(this.callers.get(caller) || []).filter(t => t > cutoff), this.now()])
     if (op === 'attest') this.attests.set(owner.toLowerCase(), (this.attests.get(owner.toLowerCase()) || 0) + 1)
     this.spent.push({ at: this.now(), eth })
   }

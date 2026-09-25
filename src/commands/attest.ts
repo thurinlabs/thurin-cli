@@ -2,7 +2,7 @@ import { toHex, encodeFunctionData, isAddress, getAddress, recoverTypedDataAddre
 import { writeFileSync, readFileSync } from 'node:fs'
 import { normalize } from 'viem/ens'
 import {
-  REGISTRY_ABI, parsePgpKey, verifyAttestation, leanKey, claimSignature, identifyProof, fingerprintToBytes, OWNER_REVOKE_REASONS,
+  REGISTRY_ABI, parsePgpKey, verifyAttestation, leanKey, claimSignature, signatureEmail, identifyProof, fingerprintToBytes, OWNER_REVOKE_REASONS,
   type RevokeReason,
 } from '@thurinlabs/identity-kit/core'
 import { chainCtx, claimsOf, readRegistry, type ChainCtx } from '../lib/chain.js'
@@ -61,11 +61,14 @@ const byteLength = (v: string | Uint8Array) => typeof v === 'string' ? new TextE
 export async function preflight(ctx: ChainCtx, owner: Address, fpr: string, includeEmail: boolean, needSignature: boolean, source: PresignedInputs | null = null) {
   const full = source ? source.key : await exportMinimal(fpr)
   const lean = await leanKey(full, { includeEmail })
-  if (!lean) throw new CliError(`Every name on ${fpr} contains an email. Add one without: ${addNameHint(fpr)} — or pass --include-email`, EXIT.FAILED)
+  if (!lean) throw new CliError(`Every name on ${fpr} contains an email, or carries a notation that does. Add one without: ${addNameHint(fpr)} — or pass --include-email`, EXIT.FAILED)
+  if (lean.keyNotationEmails.length) throw new CliError(`A notation on the key itself holds an email (${lean.keyNotationEmails.join(', ')}), and it would go on-chain for good. Remove it with gpg, or pass --include-email`, EXIT.FAILED)
   const info_ = await parsePgpKey(lean.binary)
   if (!info_) throw new CliError('Exported key does not parse', EXIT.FAILED)
   if (info_.fingerprint.toUpperCase() !== fpr.toUpperCase()) throw new CliError('Exported key fingerprint does not match', EXIT.FAILED)
   const proofs = info_.notations.map(identifyProof).filter(Boolean)
+  // Everything else on the published names goes on-chain too, so the summary shows it.
+  const otherNotes = info_.notations.filter(n => !identifyProof(n)).map(n => `${n.name}=${n.value}`)
   if (lean.binary.length > MAX_KEY) throw new CliError(`Key is ${lean.binary.length} bytes; the registry accepts up to ${MAX_KEY}`, EXIT.FAILED)
   let signature: string | null = null   // 0x hex, or a clearsigned message kept whole
   let sigBytes = 0
@@ -80,18 +83,20 @@ export async function preflight(ctx: ChainCtx, owner: Address, fpr: string, incl
     }
     const cs = await claimSignature({ signature: raw, key: lean.binary, address: owner })
     if (!cs) throw new CliError(`${source ? 'The statement file' : 'The signature'} is not a PGP signature`, EXIT.FAILED)
+    const signedEmail = await signatureEmail(raw)
+    if (signedEmail && !includeEmail) throw new CliError(`The signature carries your email (${signedEmail}); gpg adds it when told the key by email or name, or when gpg.conf sets sender. It would go on-chain for good. Sign again with --disable-signer-uid${source ? `: printf '%s' '${attestStatement(owner)}' | gpg --detach-sign --textmode --disable-signer-uid -u ${fpr}` : ''} — or pass --include-email`, EXIT.FAILED)
     signature = typeof cs.signature === 'string' ? cs.signature : toHex(cs.signature)
     sigBytes = byteLength(cs.signature)
     if (sigBytes > MAX_SIG) throw new CliError(`Signature is ${sigBytes} bytes; the registry accepts up to ${MAX_SIG}`, EXIT.FAILED)
     if (sigBytes + lean.binary.length > MAX_PAYLOAD) throw new CliError(`Key and signature are ${sigBytes + lean.binary.length} bytes together; the registry accepts up to ${MAX_PAYLOAD}`, EXIT.FAILED)
     const v = await verifyAttestation({ pgpPublicKey: lean.binary, pgpSignature: cs.signature, fingerprint: fpr, ethAddress: owner })
-    if (!v.verified) throw new CliError(`The signature does not verify against the ${source ? 'given' : 'exported'} key: ${v.reason}${source ? `\nSign exactly this line, with no line break after it: printf '%s' '${attestStatement(owner)}' | gpg --detach-sign --textmode` : ''}`, EXIT.FAILED)
+    if (!v.verified) throw new CliError(`The signature does not verify against the ${source ? 'given' : 'exported'} key: ${v.reason}${source ? `\nSign exactly this line, with no line break after it: printf '%s' '${attestStatement(owner)}' | gpg --detach-sign --textmode --disable-signer-uid` : ''}`, EXIT.FAILED)
   }
-  return { key: toHex(lean.binary), signature, kept: lean.kept, removed: lean.removed, proofs: proofs.length, bytes: lean.binary.length + sigBytes }
+  return { key: toHex(lean.binary), signature, kept: lean.kept, removed: lean.removed, proofs: proofs.length, otherNotes, bytes: lean.binary.length + sigBytes }
 }
 
 function summary(p: Awaited<ReturnType<typeof preflight>>) {
-  return `${label('names')}${p.kept.join(', ')}${p.removed.length ? dim(`  (left out: ${p.removed.join(', ')})`) : ''}\n${label('proofs')}${p.proofs}\n${label('size')}${(p.bytes / 1024).toFixed(1)} KB`
+  return `${label('names')}${p.kept.join(', ')}${p.removed.length ? dim(`  (left out: ${p.removed.join(', ')})`) : ''}\n${label('proofs')}${p.proofs}\n${p.otherNotes.length ? `${label('notations')}${p.otherNotes.join('\n' + ' '.repeat(12))}\n` : ''}${label('size')}${(p.bytes / 1024).toFixed(1)} KB`
 }
 
 export async function send(ctx: ChainCtx, opts: Record<string, any>, functionName: string, args: unknown[], what: string, target?: { address: Address; abi: unknown }) {
@@ -256,7 +261,7 @@ async function emitAuthorized(ctx: ChainCtx, opts: Record<string, any>, h: Hando
   const where = describeDeadline(deadline)
   const head = `${ok('Authorized')} ${op}${index !== undefined ? ` #${index}` : ''} from ${owner} (nonce ${nonce}). Anyone can publish it for ${where}.\nIt can't be recalled before then; after then it does nothing.\n`
   if (opts.out) {
-    writeFileSync(opts.out, JSON.stringify(h, null, 2) + '\n')
+    writeFileSync(opts.out, JSON.stringify(h, null, 2) + '\n', { mode: 0o600 })   // a permission anyone holding it can publish
     out({ authorized: true, op, owner, fingerprint: fpr, network: ctx.network, index, nonce, deadline, file: opts.out }, () =>
       `${head}${label('file')}${opts.out}\n${dim(`Publish with: thurin submit ${opts.out}`)}`)
     return

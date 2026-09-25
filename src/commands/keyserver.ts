@@ -33,16 +33,17 @@ export async function keyserver(_args: string[], opts: Record<string, any>) {
     const hit = cache.get(search)
     if (hit && Date.now() - hit.at < ttl) return hit.value
     const value = await find(ctx, search)
+    for (const [k, v] of cache) if (Date.now() - v.at >= ttl) cache.delete(k)   // expired lookups don't linger
     cache.set(search, { at: Date.now(), value })
     return value
   }
 
-  const server = createServer((req, res) => handle(req, res).catch(e => text(res, 500, `error: ${e.message}`)))
+  const server = createServer((req, res) => handle(req, res).catch(e => { log('lookup', e instanceof CliError && e.code === EXIT.CHAIN ? 'error: chain read failed' : `error: ${e.name}`); text(res, 500, 'error: reading the chain failed; try again') }))
   async function handle(req: IncomingMessage, res: ServerResponse) {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
     res.setHeader('access-control-allow-origin', '*')
     if (req.method === 'POST' && url.pathname === '/pks/add') {
-      log(req, 'add refused')
+      log('add', 'refused')
       return text(res, 405, 'This keyserver has no upload. Keys are published by their owner attesting at https://thurin.id/attest or with `thurin attest`.')
     }
     const browser = /text\/html/.test(req.headers.accept || '')
@@ -60,12 +61,12 @@ export async function keyserver(_args: string[], opts: Record<string, any>) {
     let entries: Entry[]
     try { entries = await lookup(search) }
     catch (e: any) {
-      if (e instanceof CliError && e.code === EXIT.USAGE) { log(req, `refused: ${e.message}`); return miss(e.message) }   // an email or a word: nothing to find by design
-      if (e instanceof CliError && e.code === EXIT.FAILED) { log(req, 'not found'); return miss('No key found') }
+      if (e instanceof CliError && e.code === EXIT.USAGE) { log(op, 'refused'); return miss(e.message) }   // an email or a word: nothing to find by design
+      if (e instanceof CliError && e.code === EXIT.FAILED) { log(op, 'not found'); return miss('No key found') }
       throw e
     }
-    if (!entries.length) { log(req, 'not found'); return miss('No key found') }
-    log(req, `${op} ${entries.length} key(s)`)
+    if (!entries.length) { log(op, 'not found'); return miss('No key found') }
+    log(op, `${entries.length} key(s)`)
     if (op === 'get') {
       const body = entries.map(e => e.armored).join('\n')
       // gpg gets the keyserver media type. A browser (Accept: text/html) gets the same bytes
@@ -260,7 +261,8 @@ gpg --recv-keys &lt;fingerprint&gt;</pre>
 `
 }
 
-// No caller IP: a log of who looked up which key is the thing Thurin's privacy rule forbids.
-function log(req: IncomingMessage, msg: string) {
-  process.stdout.write(`${new Date().toISOString()} ${req.method} ${req.url} ${msg}\n`)
+// Only what happened, never who asked or what for: no IP, and no search term (gpg sends emails
+// and the key IDs of every signature it checks, so the terms alone are a record of who reads what).
+function log(op: string, outcome: string) {
+  process.stdout.write(`${new Date().toISOString()} ${/^[a-z]{1,8}$/.test(op) ? op : '?'} ${outcome}\n`)
 }
