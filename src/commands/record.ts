@@ -4,7 +4,7 @@ import { type Address } from 'viem'
 import { chainCtx, claimsOf, resolveOwners, detectLookup, readRegistry, type ChainCtx } from '../lib/chain.js'
 import { parseReleases, addRelease, renderReleases, checkKindName, checkRecordValue, KNOWN_KINDS } from '@thurinlabs/identity-kit/core'
 import { send, ownerFor, pickIndex, handoff, authorize } from './attest.js'
-import { out, info, ok, bad, dim, bold, label, isJson, CliError, EXIT } from '../lib/output.js'
+import { out, ok, dim, bold, label, isJson, CliError, EXIT } from '../lib/output.js'
 
 export async function record(args: string[], opts: Record<string, any>) {
   switch (args[0]) {

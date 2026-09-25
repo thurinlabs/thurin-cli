@@ -1,5 +1,5 @@
 import { listKeys, findKey, exportMinimal, importKey, MAKE_KEY_HINT, addNameHint, type KeyListing } from '../lib/gpg.js'
-import { parsePgpKey, identifyProof, hasEmailUserID } from '@thurinlabs/identity-kit/core'
+import { parsePgpKey, identifyProof } from '@thurinlabs/identity-kit/core'
 import { chainCtx, claimsOf, detectLookup, resolveOwners } from '../lib/chain.js'
 import { readConfig, writeConfig } from '../lib/config.js'
 import { out, ok, bad, dim, bold, info, CliError, EXIT } from '../lib/output.js'

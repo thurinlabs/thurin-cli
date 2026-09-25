@@ -1,4 +1,4 @@
-import { identifyProof, verifyProof, displayUrl, claimCheckText, expiresSoon, claimFates, type ProofResult, type ClaimFate, type PGPVerification } from '@thurinlabs/identity-kit/core'
+import { identifyProof, verifyProof, displayUrl, claimCheckText, expiresSoon, claimFates, type ClaimFate, type PGPVerification } from '@thurinlabs/identity-kit/core'
 import { listKeystores } from '../lib/keystore.js'
 import { chainCtx, claimsOf, detectLookup, resolveOwners, ensNameOf, type Claim } from '../lib/chain.js'
 import { out, ok, bad, dim, bold, label, CliError, EXIT } from '../lib/output.js'

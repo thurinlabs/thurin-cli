@@ -1,6 +1,6 @@
 import pc from 'picocolors'
 import { existsSync, readFileSync } from 'node:fs'
-import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
+import { privateKeyToAccount } from 'viem/accounts'
 import { generateMnemonic, mnemonicToAccount } from 'viem/accounts'
 import { english } from 'viem/accounts'
 import { bytesToHex } from '@noble/hashes/utils'

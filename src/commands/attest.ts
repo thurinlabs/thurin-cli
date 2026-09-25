@@ -58,7 +58,7 @@ const byteLength = (v: string | Uint8Array) => typeof v === 'string' ? new TextE
  * on-chain lean (raw bytes, emails left out unless asked, SSH-only subkeys left out) and the
  * signature as its raw packet: exactly what thurin.id publishes.
  */
-export async function preflight(ctx: ChainCtx, owner: Address, fpr: string, includeEmail: boolean, needSignature: boolean, source: PresignedInputs | null = null) {
+export async function preflight(owner: Address, fpr: string, includeEmail: boolean, needSignature: boolean, source: PresignedInputs | null = null) {
   const full = source ? source.key : await exportMinimal(fpr)
   const lean = await leanKey(full, { includeEmail })
   if (!lean) throw new CliError(`Every name on ${fpr} contains an email, or carries a notation that does. Add one without: ${addNameHint(fpr)}. Or pass --include-email.`, EXIT.FAILED)
@@ -374,7 +374,7 @@ export async function attest(_args: string[], opts: Record<string, any>) {
   const existing = (await claimsOf(ctx, owner)).filter(c => !c.revokedAt)
   const dup = existing.find(c => c.fingerprint === fpr)
   if (dup) throw new CliError(`${owner} already has an active claim for ${fpr} (#${dup.index}). New names or proofs on it: thurin update-key ${dup.index}`, EXIT.FAILED)
-  const p = await preflight(ctx, owner, fpr, !!opts.includeEmail, true, pre)
+  const p = await preflight(owner, fpr, !!opts.includeEmail, true, pre)
   if (!isJson()) process.stderr.write(summary(p) + '\n')
   if (opts.authorize) return authorize(ctx, opts, 'attest', owner, fpr, p)
   if (opts.noKey) return handoff(ctx, opts, 'attest', owner, fpr, p)
@@ -393,7 +393,7 @@ export async function updateKey(args: string[], opts: Record<string, any>) {
   const c = claims[idx]
   if (c.revokedAt) throw new CliError(`Claim #${idx} is already revoked`, EXIT.FAILED)
   const includeEmail = opts.includeEmail ?? (c.keyInfo?.userIDs.some(u => u.includes('@')) ?? false)
-  const p = await preflight(ctx, owner, c.fingerprint, includeEmail, false, pre)
+  const p = await preflight(owner, c.fingerprint, includeEmail, false, pre)
   if (c.keyHex && p.key.toLowerCase() === c.keyHex.toLowerCase()) throw new CliError(`The ${pre ? 'given' : 'exported'} key is identical to the one on-chain; nothing to update`, EXIT.FAILED)
   if (!isJson()) process.stderr.write(summary(p) + '\n')
   if (opts.authorize) return authorize(ctx, { ...opts, includeEmail }, 'update-key', owner, c.fingerprint, p, idx)
@@ -417,7 +417,7 @@ export async function reattest(args: string[], opts: Record<string, any>) {
     const [names] = await readRegistry<[string[], string[]]>(ctx, 'recordsOf', [owner, BigInt(idx)])
     if (names.includes('thurin.canary')) info(`Your canary was signed by the old key. After this, set a new one signed with ${fpr}.`)
   }
-  const p = await preflight(ctx, owner, fpr, !!opts.includeEmail, true, pre)
+  const p = await preflight(owner, fpr, !!opts.includeEmail, true, pre)
   if (!isJson()) process.stderr.write(summary(p) + '\n')
   if (opts.compromised && (opts.authorize || opts.noKey)) throw new CliError('--compromised sends two calls in one transaction from this keystore; with --authorize or --no-key, reattest first, then: thurin revoke <old index> --reason compromised', EXIT.USAGE)
   if (opts.authorize) return authorize(ctx, opts, 'reattest', owner, fpr, p, idx)

@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import type { Address } from 'viem'
 import { chainCtx, claimsOf, resolveOwners, detectLookup, ensNameOf, type ChainCtx, type Claim } from '../lib/chain.js'
 import { CliError, EXIT, ok, bold, dim, label } from '../lib/output.js'
+import { listen } from '../lib/listen.js'
 
 /**
  * thurin keyserver — the registry served over HKP, the protocol gpg has spoken since the
@@ -10,7 +11,7 @@ import { CliError, EXIT, ok, bold, dim, label } from '../lib/output.js'
  * --refresh-keys, --locate-keys, and auto-key-retrieve on the machine reads Ethereum.
  *
  * Stateless: no database, nothing but chain reads and a short in-memory cache. There is no
- * /pks/add — publishing is attesting — so certificate flooding is structurally impossible.
+ * /pks/add: a key is published by its owner's claim, so nobody can flood it with signatures.
  * A fetch by full fingerprint is self-authenticating: gpg checks what it gets hashes to what
  * it asked for, so even a hostile server can only withhold, never substitute.
  */
@@ -23,11 +24,6 @@ export async function keyserver(_args: string[], opts: Record<string, any>) {
   const port = Number(opts.port || 11371)
   const ttl = Number(opts.cacheSeconds ?? 60) * 1000
   const cache = new Map<string, { at: number; value: Entry[] }>()
-
-  process.stderr.write(`${ok('thurin keyserver')} on ${ctx.network} · ${bold(`hkp://${host}:${port}`)}\n` +
-    `${label('gpg')}gpg --keyserver hkp://${host}:${port} --recv-keys <fingerprint>\n` +
-    `${label('dirmngr')}echo "keyserver hkp://${host}:${port}" >> ~/.gnupg/dirmngr.conf && gpgconf --kill dirmngr\n` +
-    `${dim('No /pks/add: owners publish keys as claims. Cache ' + ttl / 1000 + 's.')}\n`)
 
   async function lookup(search: string): Promise<Entry[]> {
     const hit = cache.get(search)
@@ -96,7 +92,11 @@ export async function keyserver(_args: string[], opts: Record<string, any>) {
     res.end(lines.join('\n') + '\n')
   }
 
-  server.listen(port, host)
+  await listen(server, port, host)
+  process.stderr.write(`${ok('thurin keyserver')} on ${ctx.network} · ${bold(`hkp://${host}:${port}`)}\n` +
+    `${label('gpg')}gpg --keyserver hkp://${host}:${port} --recv-keys <fingerprint>\n` +
+    `${label('dirmngr')}echo "keyserver hkp://${host}:${port}" >> ~/.gnupg/dirmngr.conf && gpgconf --kill dirmngr\n` +
+    `${dim('No /pks/add: owners publish keys as claims. Cache ' + ttl / 1000 + 's.')}\n`)
   await new Promise<void>(resolve => { for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => { server.close(); resolve() }) })
 }
 
@@ -118,7 +118,7 @@ export function hkpSearchTerm(search: string): string {
   return q
 }
 
-async function find(ctx: ChainCtx, search: string): Promise<Entry[]> {
+export async function find(ctx: ChainCtx, search: string): Promise<Entry[]> {
   const q = hkpSearchTerm(search)
   // 0x + 40 hex is how gpg spells a fingerprint, and also an Ethereum address. Try it as a
   // fingerprint first (a registry index read, never throws on shape); if no claim, as an address.
@@ -128,9 +128,9 @@ async function find(ctx: ChainCtx, search: string): Promise<Entry[]> {
   try { owners = (await resolveOwners(ctx, lookup)).owners }
   catch (e) {
     if (!hex40) throw e
-    lookup = { type: 'address', value: q }
+    // gpg uppercases it, which breaks the checksum; lowercase skips the check
+    lookup = { type: 'address', value: q.toLowerCase() }
     try { owners = (await resolveOwners(ctx, lookup)).owners } catch { throw e }
-    // an address that is not checksummed correctly is not an address gpg would send us; viem will say so below
   }
   const out: Entry[] = []
   for (const owner of owners) {
@@ -175,7 +175,7 @@ const spaced = (fpr: string) => fpr.replace(/(.{4})/g, '$1 ').trim().replace(/^(
 
 /**
  * The index a person sees: the listing every keyserver printed since the 1990s, one entry per
- * key, plus the line no keyserver could print — who claims it, on-chain — linking to the claim.
+ * key, plus the line no other keyserver can print: who claims it on-chain, linked to the claim.
  */
 export function indexListing(entries: Entry[], names: Map<string, string | null>): string {
   const L: string[] = []
@@ -203,47 +203,53 @@ export function frontDoor(req: IncomingMessage, ctx: ChainCtx, search = '', mess
   return `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
 <title>${esc(host)}</title>
 <style>
-body { background: #1a1a12; color: #faf9f5; font-family: 'Share Tech Mono', ui-monospace, monospace; max-width: 78ch; margin: 3rem auto; padding: 0 1rem; line-height: 1.55; }
-h1 { font-weight: 400; font-size: 1.6rem; margin: 0 0 1.25rem; color: #7c9a3e; }
-h1 span { color: #c9a227; }
+/* Thurin.id's two palettes; the page follows the system setting, no script. */
+:root { --bg: #1a1a12; --deep: #151510; --border: #3a3a2a; --text: #faf9f5; --muted: #a8a598; --green: #7c9a3e; --link: #96b84e; --gold: #c9a227; --on-green: #1a1a12; color-scheme: dark; }
+@media (prefers-color-scheme: light) {
+  :root { --bg: #faf9f5; --deep: #f0efe8; --border: #d0cfc4; --text: #2a2a22; --muted: #6b6960; --green: #5a7228; --link: #5a7228; --gold: #a8861e; --on-green: #faf9f5; color-scheme: light; }
+}
+body { background: var(--bg); color: var(--text); font-family: 'Share Tech Mono', ui-monospace, monospace; max-width: 78ch; margin: 3rem auto; padding: 0 1rem; line-height: 1.55; }
+h1 { font-weight: 400; font-size: 1.6rem; margin: 0 0 1.25rem; color: var(--green); }
+h1 span { color: var(--gold); }
 p { margin: 0 0 1.25rem; }
-a { color: #96b84e; }
+a { color: var(--link); }
 form { display: flex; gap: .5rem; flex-wrap: wrap; margin: 0 0 1.5rem; }
-input { flex: 1 1 30ch; font: inherit; background: #141010; color: #faf9f5; border: 1px solid #3a3a2c; border-radius: 3px; padding: .45rem .6rem; }
-input:focus { outline: none; border-color: #7c9a3e; }
-button { font: inherit; background: #7c9a3e; color: #141010; border: 0; border-radius: 3px; padding: .45rem .9rem; cursor: pointer; }
-pre.cmd { white-space: pre; overflow-x: auto; }
-pre { background: #141010; border: 1px solid #3a3a2c; border-radius: 3px; padding: .9rem 1rem; margin: 0 0 1.5rem; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .92rem; }
-.dim { color: #a8a598; }
-.note { color: #a8a598; font-size: .85rem; margin: 0 0 1.5rem; }
-footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #3a3a2c; font-size: .82rem; letter-spacing: .06em; color: #a8a598; display: flex; justify-content: space-between; align-items: flex-start; gap: 2rem; flex-wrap: wrap; }
-footer .version { opacity: .6; }
-footer .cols { display: flex; gap: 3rem; }
+input { flex: 1 1 30ch; font: inherit; background: var(--deep); color: var(--text); border: 1px solid var(--border); border-radius: 3px; padding: .45rem .6rem; }
+input:focus { outline: none; border-color: var(--green); }
+button { font: inherit; background: var(--green); color: var(--on-green); border: 0; border-radius: 3px; padding: .45rem .9rem; cursor: pointer; }
+pre { background: var(--deep); border: 1px solid var(--border); border-radius: 3px; padding: .9rem 1rem; margin: 0 0 1.5rem; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .92rem; }
+pre.keys { white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+.dim { color: var(--muted); }
+.note { color: var(--muted); font-size: .85rem; margin: 0 0 1.5rem; }
+footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); font-size: .82rem; letter-spacing: .06em; color: var(--muted); display: flex; justify-content: space-between; align-items: flex-start; gap: 2rem; flex-wrap: wrap; }
+footer .version { opacity: .7; }
+footer .cols { display: flex; gap: 3rem; flex-wrap: wrap; }
 footer .col { display: flex; flex-direction: column; gap: .35rem; }
-footer .col b { color: #faf9f5; font-weight: 600; text-transform: uppercase; font-size: .7rem; letter-spacing: .12em; margin-bottom: .2rem; }
-footer .col a { color: #a8a598; text-decoration: none; }
-footer .col a:hover { color: #7c9a3e; }
+footer .col b { color: var(--text); font-weight: 600; text-transform: uppercase; font-size: .7rem; letter-spacing: .12em; margin-bottom: .2rem; }
+footer .col a { color: var(--muted); text-decoration: none; }
+footer .col a:hover { color: var(--green); }
 </style>
 <h1>${esc(dotId ? host.replace(/\.id(:\d+)?$/, '') : host)}${dotId ? '<span>.id</span>' : ''}</h1>
-<p>A PGP keyserver whose database is Ethereum. A key is here because its owner published a claim from their own address on the <a href="https://docs.thurin.id/#/contracts" target="_blank" rel="noopener noreferrer">Thurin.id registry</a>. There is no upload, and nothing to poison: revoke the claim and the key is gone.</p>
+<p>A PGP keyserver whose database is Ethereum. A key is here because its owner published a claim from their own address on the <a href="https://docs.thurin.id/#/contracts" target="_blank" rel="noopener noreferrer">Thurin.id registry</a>. There is no upload, and nothing to poison: revoke the claim and the key is no longer served.</p>
 <form action="/pks/lookup" method="get">
   <input type="hidden" name="op" value="index">
   <input name="search" value="${esc(search)}" placeholder="fingerprint, key ID, address, or ENS name" aria-label="Search" autofocus>
   <button>Search for a key</button>
 </form>
 ${message ? `<p class="note">${esc(message)}</p>` : ''}
-${listing ? `<pre>${listing}</pre>` : ''}
+${listing ? `<pre class="keys">${listing}</pre>` : ''}
 <p>Point gpg at it, once:</p>
-<pre class="cmd">echo "keyserver ${esc(self)}" &gt;&gt; ~/.gnupg/dirmngr.conf &amp;&amp; gpgconf --kill dirmngr
+<pre>echo "keyserver ${esc(self)}" &gt;&gt; ~/.gnupg/dirmngr.conf &amp;&amp; gpgconf --kill dirmngr
 gpg --recv-keys &lt;fingerprint&gt;</pre>
 <footer>
   <span class="version">thurin keyserver ${VERSION} · ${ctx.network}</span>
   <div class="cols">
     <div class="col"><b>Links</b>
       <a href="https://thurin.id" target="_blank" rel="noopener noreferrer">Thurin.id</a>
-      <a href="https://thurin.id/attest" target="_blank" rel="noopener noreferrer">Attest</a>
+      <a href="https://thurin.id/attest" target="_blank" rel="noopener noreferrer">Add key</a>
       <a href="https://thurinlabs.id" target="_blank" rel="noopener noreferrer">Thurin Labs</a>
     </div>
     <div class="col"><b>Keyserver</b>

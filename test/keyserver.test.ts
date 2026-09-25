@@ -1,10 +1,10 @@
 // @vitest-environment node
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { hkpSearchTerm } from '../src/commands/keyserver.js'
 
 describe('keyserver search terms', () => {
   it('accepts what gpg sends and the identifiers Thurin knows', () => {
-    expect(hkpSearchTerm('0x08B9374FDFBEC67EFFA24E669D3D86E35361EF7B')).toBe('0x08B9374FDFBEC67EFFA24E669D3D86E35361EF7B')   // 0x40: tried as address, then fingerprint
+    expect(hkpSearchTerm('0x08B9374FDFBEC67EFFA24E669D3D86E35361EF7B')).toBe('0x08B9374FDFBEC67EFFA24E669D3D86E35361EF7B')   // 0x40: tried as fingerprint, then address
     expect(hkpSearchTerm('0x9D3D86E35361EF7B')).toBe('9D3D86E35361EF7B')
     expect(hkpSearchTerm('9D3D86E35361EF7B')).toBe('9D3D86E35361EF7B')
     expect(hkpSearchTerm('thurinlabs.eth')).toBe('thurinlabs.eth')
@@ -42,5 +42,26 @@ describe('keyserver front door', () => {
     expect(local).toContain('value=""')
     expect(local).toContain('No key found: x@y.z')
     expect(local).not.toContain('<script')
+  })
+})
+
+describe('keyserver lookup', () => {
+  it('finds an address gpg sent uppercased as a fingerprint', async () => {
+    vi.resetModules()
+    const owner = '0x539C7e1E454296Dc150B95a0acCC05bCa3b33538'
+    const seen: string[] = []
+    vi.doMock('../src/lib/chain.js', async (orig) => ({
+      ...(await orig<any>()),
+      resolveOwners: async (_: any, l: any) => {
+        if (l.type === 'fingerprint') throw new Error('no claim')
+        seen.push(l.value)
+        return { owners: [l.value] }
+      },
+      claimsOf: async () => [],
+    }))
+    const { find } = await import('../src/commands/keyserver.js')
+    await find({} as any, owner.toUpperCase().replace('0X', '0x'))
+    expect(seen).toEqual([owner.toLowerCase()])
+    vi.doUnmock('../src/lib/chain.js')
   })
 })

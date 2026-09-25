@@ -2,13 +2,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { createHash, randomBytes } from 'node:crypto'
 import { createWalletClient, http, formatEther, type Address } from 'viem'
 import { REGISTRY_ABI } from '@thurinlabs/identity-kit/core'
-import { chainCtx, type ChainCtx } from '../lib/chain.js'
+import { chainCtx } from '../lib/chain.js'
 import { loadAccount } from '../lib/keystore.js'
 import { prompt } from '../lib/prompt.js'
 import { decodeHandoff, encodeHandoff, forArgsOf, FOR_FN, type Handoff } from '../lib/handoff.js'
 import { checkAuthorization } from './attest.js'
 import { Limits, LimitError, DEFAULT_LIMITS } from '../lib/limits.js'
 import { CliError, EXIT, ok, warn, bold, dim, label } from '../lib/output.js'
+import { listen } from '../lib/listen.js'
 
 /**
  * thurin relay — `thurin submit` behind an HTTP port. Accepts the same JSON a hand-off
@@ -36,11 +37,6 @@ export async function relay(_args: string[], opts: Record<string, any>) {
   const wallet = createWalletClient({ account, chain: ctx.client.chain, transport: http(ctx.rpcUrl) })
 
   const balance = await ctx.client.getBalance({ address: account.address })
-  process.stderr.write(`${ok('thurin relay')} on ${ctx.network} · paying from ${bold(account.address)} (${formatEther(balance)} ETH)\n` +
-    `${label('budget')}${limits.cfg.budgetEth} ETH/day · ${limits.cfg.attestsPerOwner} free claim per address · ${limits.cfg.perCallerPerHour} requests/hour per caller · ≤ ${limits.cfg.maxGas} gas/tx\n` +
-    `${label('listen')}http://${host}:${port}  ${dim('(put nginx or another TLS proxy in front)')}\n`)
-  if (balance === 0n) warn('The paying account holds no ETH; every request will fail until it is funded.')
-
   // One transaction at a time: a hot wallet with concurrent sends races its own nonce.
   let chain: Promise<unknown> = Promise.resolve()
   const serial = <T,>(fn: () => Promise<T>) => { const p = chain.then(fn, fn); chain = p.catch(() => {}); return p }
@@ -86,7 +82,11 @@ export async function relay(_args: string[], opts: Record<string, any>) {
     }
   }
 
-  server.listen(port, host)
+  await listen(server, port, host)
+  process.stderr.write(`${ok('thurin relay')} on ${ctx.network} · paying from ${bold(account.address)} (${formatEther(balance)} ETH)\n` +
+    `${label('budget')}${limits.cfg.budgetEth} ETH/day · ${limits.cfg.attestsPerOwner} free claim per address · ${limits.cfg.perCallerPerHour} requests/hour per caller · ≤ ${limits.cfg.maxGas} gas/tx\n` +
+    `${label('listen')}http://${host}:${port}  ${dim('(put nginx or another TLS proxy in front)')}\n`)
+  if (balance === 0n) warn('The paying account holds no ETH; every request will fail until it is funded.')
   await new Promise<void>(resolve => { for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => { server.close(); resolve() }) })
 }
 

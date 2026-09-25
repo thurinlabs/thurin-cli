@@ -83,10 +83,9 @@ export function attestStatement(address: string) {
 
 /**
  * Which key signs for a given primary. If the primary itself can sign (an [SC]
- * key, like most YubiKey-era keys) we pin it with "!": letting gpg pick "the
- * signing subkey" chose a subkey sitting in a card's Authentication slot and
- * produced bad signatures (2026-09-14). If the primary is certify-only (the shape
- * the company key uses) we pin its live signing subkey.
+ * key, like most YubiKey-era keys) we pin it with "!": left to choose, gpg can pick a
+ * subkey in a card's Authentication slot and make a bad signature. If the primary is
+ * certify-only, we pin its live signing subkey.
  */
 export async function signingKeyFor(fingerprint: string): Promise<string> {
   const out = await gpg(['--with-colons', '--with-fingerprint', '--with-fingerprint', '--list-secret-keys', fingerprint])

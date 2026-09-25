@@ -3,7 +3,7 @@ import { normalize } from 'viem/ens'
 import { chainCtx, claimsOf, rpcHost, type ChainCtx, type Claim } from '../lib/chain.js'
 import { ENS_HINT_KEY, ensHintFor, ensHintWrite, type EnsHint } from '@thurinlabs/identity-kit/core'
 import { send } from './attest.js'
-import { out, info, ok, bad, dim, bold, label, isJson, CliError, EXIT } from '../lib/output.js'
+import { out, ok, bad, dim, bold, label, isJson, CliError, EXIT } from '../lib/output.js'
 
 /**
  * thurin ens check <name>: does the name's id.thurin record point at the key its address claims?

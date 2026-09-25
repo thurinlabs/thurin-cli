@@ -41,7 +41,7 @@ export interface Handoff {
   signature?: string
   /** reattest: move the replaced claim's records to the new one (default true). */
   keepRecords?: boolean
-  /** revoke: '', 'compromised', 'retired', 'superseded', or 'other'. */
+  /** revoke: '', 'compromised', 'retired', or 'other'. */
   reason?: RevokeReason
   /** Claim index to replace (reattest), update (update-key), revoke, set a record on, or mark compromised. */
   index?: number
