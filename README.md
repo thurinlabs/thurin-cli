@@ -1,22 +1,24 @@
 # thurin
 
-Your online identity, from a terminal. Look up any identity on [Thurin.id](https://thurin.id), and attest, update, or revoke your own claim on the PGPRegistry, with every check run before a single unit of gas is spent.
+Your PGP key on your Ethereum address, from a terminal. Look anyone up on [Thurin.id](https://thurin.id), and add, change, or end your own claim. Every check runs before any gas is spent.
 
-Two rules it never breaks: **it is not a wallet** (create, import, list, export keystores; no balances, no transfers), and **it never holds a PGP secret** (every PGP operation is your own `gpg`; passphrases go through pinentry).
+Two rules: **it is not a wallet** (it makes, imports, lists, and exports keystores; no balances, no transfers), and **it never holds a PGP secret or makes keys** (every PGP step is your own `gpg`; passphrases go through pinentry).
 
-A [Thurin Labs](https://thurinlabs.id) project. MIT.
+Full reference: [docs.thurin.id/#/cli](https://docs.thurin.id/#/cli). A [Thurin Labs](https://thurinlabs.id) project. MIT.
 
 ## Install
 
 ```bash
 npm install -g @thurinlabs/thurin
-# or run without installing:
-npx @thurinlabs/thurin status bendoubleu.eth
+# or without installing:
+npx @thurinlabs/thurin status thurinlabs.eth
 ```
 
-Needs Node 20+ and GnuPG 2.2+ on the machine for anything involving a key.
+Node 20 or newer, and GnuPG 2.2 or newer for anything that touches a key. Releases are signed: [how to check one](https://docs.thurin.id/#/guides/verify-release).
 
-## Look something up
+`thurin --help` is one screen; `thurin help <command>` has the rest.
+
+## Look someone up
 
 ```
 $ thurin status thurinlabs.eth
@@ -24,7 +26,6 @@ thurinlabs.eth  0x539C7e1E454296Dc150B95a0acCC05bCa3b33538  (mainnet)
 claims      1 total · 1 active · 0 revoked
 fingerprint 08B9374FDFBEC67EFFA24E669D3D86E35361EF7B  ✓ verified
 name        Thurin Labs
-name        Thurin Labs <hello@thurin.id>
 key         Ed25519 · created 2026-09-12 · expires 2028-09-11
 proofs
   ✓ GitHub     thurinlabs
@@ -34,163 +35,103 @@ proofs
 efp         2 followers · 0 following
 ```
 
-Accepts an ENS name, an address, a PGP fingerprint, or a 16-character key ID. `--json` prints the same as data. Exit code 1 means the identity has no verified claim.
+It takes an ENS name, an address, a fingerprint, or a 16-character key ID. Exit code 1 means no verified claim. When a claim doesn't count, the line says why: `✗ key expired`, `✗ key revoked`, `✗ key compromised`, `✗ doesn't verify`, and so on.
 
-If a claim doesn't count, the line says why instead of ✓: `✗ key expired 2029-03-05`, `✗ key revoked`, `✗ key compromised`, `✗ signing key expired`, `✗ not supported (DSA 2048)`, or `✗ doesn't verify`. A verified key that expires within 30 days gets `⚠ key expires in 12 days (2027-03-06)`, and the history marks a claim replaced by `reattest` as `replaced → #N`. When a keystore on this machine holds the address, each line adds the fix (for example `: extend it (gpg --quick-set-expire), then thurin update-key`). `--json` carries the same as `verification.kind`, `verification.at`, and each claim's `fate` (0.12.0).
-
-## Attest, in three commands
+## Add your key
 
 ```bash
-gpg --quick-gen-key "Your Name" ed25519 sign 2y   # a key with a name and no email (gpg makes keys; Thurin never does)
-thurin wallet create identity       # a fresh address; the 12 words are shown once
-thurin attest                       # signs the statement with gpg, checks everything, publishes
+gpg --quick-gen-key "Your Name" ed25519 sign 2y   # gpg makes the key; leave the email off
+thurin wallet create identity                      # a fresh address; the 12 words are shown once
+thurin attest --key <fingerprint>
 ```
 
-The address needs a little ETH for the fee. Already have a key and a wallet? `thurin attest --key <fingerprint> --account <keystore name>`, or `--account path/to/any-v3-keystore.json` (Foundry's `~/.foundry/keystores/*` work as they are). `THURIN_PRIVATE_KEY` in the environment also works, for scripts.
+The address needs a little ETH for the fee. `--account` takes a keystore name or a path to any V3 keystore (Foundry's work as they are); `THURIN_PRIVATE_KEY` works for scripts.
 
-Before publishing, `attest` exports a minimal copy of your key, leaves out every name that contains an email (pass `--include-email` to keep them) and any SSH-only subkey, signs `I control the Ethereum address: 0x…` with your key (a detached signature over exactly that line), verifies it against the export exactly the way thurin.id will, checks the size limits and that no active claim already exists, and shows you what goes on-chain: the key and the signature as raw bytes, the same thing thurin.id publishes. Then it asks once and sends.
+Before it asks, `attest` exports a minimal copy of the key without names that contain an email (`--include-email` keeps them), has gpg sign `I control the Ethereum address: 0x…`, checks it the way thurin.id will, and shows what goes on-chain.
 
-## Change your claim
+## Change or end a claim
 
 ```bash
-thurin update-key          # after adding a proof notation to your key: same fingerprint, new notations, no new signature
-thurin reattest            # revoke the current claim and publish a new key in one transaction; its records move with it
-thurin reattest --drop-records               # …or leave the records with the old claim
-thurin revoke              # mark the claim inactive (it stays in chain history)
-thurin revoke --reason compromised           # final: this address can never claim that key again (or: retired, other)
-thurin revoke 0 --reason compromised         # found out later: mark a claim you already revoked or replaced, once
-thurin reattest --key <new> --compromised    # a stolen key: move to a new one and lock the old, in one transaction
+thurin update-key                            # new names or proofs, same key, no new signature
+thurin reattest --key <new>                  # replace the claim in one transaction; records move with it
+thurin reattest --key <new> --compromised    # the old key was stolen: mark it in the same transaction
+thurin revoke --reason retired               # or compromised, other, or none
+thurin revoke 0 --reason compromised         # found out later: mark a revoked or replaced claim, once
 ```
 
-Adding a proof to a key is one gpg line; see the [GnuPG guide](https://docs.thurin.id/#/guides/gnupg).
+**Compromised is final:** this address can never claim that key again. `--drop-records` leaves records on the old claim. Adding a proof to a key is one gpg line: [the guide](https://docs.thurin.id/#/guides/gnupg).
 
-## Your ETH is on a Ledger or a phone
-
-Then the CLI can't send the transaction, but it can still do the PGP half:
+## No ETH on this machine
 
 ```bash
-thurin attest --no-key --owner yourname.eth      # or --owner 0x…
+thurin attest --no-key --owner you.eth       # your ETH wallet is elsewhere: prints a link to publish from it
+thurin attest --authorize                    # no ETH anywhere: a free permission anyone can publish and pay for
+thurin attest --authorize --out auth.json    # the same as a file
+thurin submit auth.json                      # publish someone's permission from a funded keystore
 ```
 
-It signs, exports, and runs every check, then prints a `thurin.id/attest#…` link instead of sending. Open that link where the wallet is, connect the address you named, and publish. The signed statement and key travel in the part of the link after `#`, which browsers never send to any server, so nothing passes through Thurin. `reattest` and `update-key` take `--no-key` too. No keystore, password, or ETH is needed on this machine.
+A `--no-key` link carries the key and signature after the `#`, which browsers never send to a server. A permission can be used once, before its deadline (default 7 days, `--deadline 1d`), and can't be recalled without ETH, so the deadline is printed every time. `reattest`, `update-key`, `revoke`, and `record set` take both flags.
 
-## Your address has no ETH
+The Ethereum key elsewhere too? `--signer "<cmd>"` hands the typed data to any program that signs it, and `--sign-out slip.json` then `thurin authorize finish slip.json --signature 0x…` crosses an air gap. The PGP key elsewhere? `--statement` prints the line to sign and `--key-file pub.gpg --statement-file s.sig` brings it back.
 
-Then sign a permission slip instead of a transaction:
+## Records
 
 ```bash
-thurin attest --authorize                  # keystore signs typed data (free); prints a link anyone can publish
-thurin attest --authorize --deadline 1d    # default is 7d
-thurin attest --authorize --out auth.json  # a file instead of a link, for scripts
+thurin record get thurinlabs.eth               # every record on the claim
+thurin record get thurinlabs.eth canary        # one value, so it pipes into gpg --verify
+thurin record set security "mailto:security@example.com"
+thurin record clear security
+thurin record add-release "thurin-cli 0.13.0" SHA256SUMS --url https://github.com/thurinlabs/thurin-cli/releases/tag/v0.13.0
 ```
 
-The link opens on thurin.id/attest, where *any* wallet can publish it and pay the fee; the claim lands under your address, not theirs. Or someone with a funded keystore runs `thurin submit <link or file>`. `reattest`, `update-key`, and `revoke` take `--authorize` too. Before handing it out, the CLI proves the signature recovers to your address and simulates the call against the registry.
+A name without a dot gets `thurin.` in front. Values are up to 1 KB. What the names mean: [Records](https://docs.thurin.id/#/records).
 
-Know the edge: an address with no ETH can't recall a slip, so the deadline is your only safety. It is printed every time, and a slip can be used once.
-
-## Sign the slip somewhere else
-
-`--authorize` has one seam: the EIP-712 signature. Thurin builds the typed data, hands it to a signer, gets 65 bytes back, and then runs its own recovery and simulation checks whoever signed. The keystore is one signer. To keep the Ethereum key on a card or an air-gapped machine, use another; Thurin learns nothing about the hardware. All three need `--owner`, since there is no keystore to derive the address from.
+## ENS
 
 ```bash
-# a program: typed data as JSON on stdin, signature (hex, or JSON with a "signature" field) on stdout
-thurin attest --authorize --owner you.eth --signer "keycard-sign --slot 1"
-
-# a true air gap, two steps
-thurin attest --authorize --owner you.eth --sign-out slip.json   # runs every check, writes what needs signing, stops
-#   … sign the "typedData" in slip.json anywhere; only that object needs to cross the gap …
-thurin authorize finish slip.json --signature-file sig.txt       # or --signature 0x…; recovery, nonce, and simulation checks, then the link
+thurin ens check ben.thurinlabs.eth             # does the name's id.thurin record match its claim?
+thurin ens link ben.thurinlabs.eth              # set it from the keystore
+thurin ens link ben.thurinlabs.eth --calldata   # print the transaction for the wallet that manages the name
 ```
 
-The typed data is standard EIP-712 (`domain`, `types`, `primaryType`, `message`; numbers as decimal strings), so any wallet, HSM, or card tool that signs typed data can be the signer. `slip.json` also carries the unsigned hand-off, because the PGP signature inside it has a timestamp: the finishing step must reuse those exact bytes, not sign again. A signature that recovers to anyone but `--owner` is refused before it goes anywhere, and a slip made at an older nonce is refused too.
-
-## Records: the chain names what you put out
-
-A record is a small value on your claim, set only by you, readable by anyone. The first kind is `thurin.pointer`: the releases you have put out, each named by the sha256 of its checksum file.
+## Keys and wallets
 
 ```bash
-thurin record add-release "thurin-cli 0.6.0" SHA256SUMS --url https://github.com/thurinlabs/thurin-cli/releases/tag/v0.6.0
-thurin record get thurinlabs.eth pointer
+thurin key list                      # your keys, with the names and proofs that would be published
+thurin key export <fingerprint>      # the minimal armored export
+thurin key fetch thurinlabs.eth      # the key stored on-chain; --import adds it to your keyring
+thurin wallet create | import | list | export | default <name>
 ```
 
-With that, a signed release is not just one your key signed but one your identity named on-chain: a stolen key can still sign a tarball, but it cannot make the chain name it without a transaction from your address. `record set <kind> <value|--file f>` and `record clear <kind>` handle any kind; values are capped at 1 KB and the pointer record drops its oldest entries when full (they stay in chain history).
-
-## Point your ENS name at your claim
-
-```bash
-thurin ens check ben.thurinlabs.eth            # matches, not set, or points elsewhere (exit 1 unless it matches)
-thurin ens link ben.thurinlabs.eth             # set the id.thurin record from the keystore
-thurin ens link ben.thurinlabs.eth --calldata  # print the transaction for the wallet that manages the name
-```
-
-`id.thurin` is an ENS text record holding the fingerprint the name's address claims. It is a pointer for ENS viewers; the claim is the proof. `status <name>` shows it. Guide: [docs.thurin.id/#/guides/ens-record](https://docs.thurin.id/#/guides/ens-record).
+Keystores are the V3 format `cast`, geth, and most wallets import. `--password-file <path>` for scripts.
 
 ## Be a keyserver
 
-gpg has asked keyservers for keys the same way since the 1990s. `thurin keyserver` answers that question by reading the registry, so plain gpg pulls keys from Ethereum without knowing it:
-
-In a browser it looks like a keyserver always did: a search box and the `pub` / `uid` listing, with one extra line, who claims the key on-chain. gpg still gets the machine-readable index.
-
 ```bash
-thurin keyserver                          # hkp://127.0.0.1:11371
+thurin keyserver                     # hkp://127.0.0.1:11371
 gpg --keyserver hkp://127.0.0.1:11371 --recv-keys 08B9374FDFBEC67EFFA24E669D3D86E35361EF7B
 ```
 
-Make it the default and everything built on gpg follows: `--refresh-keys` picks up on-chain revocations, `--locate-keys` works, and with `auto-key-retrieve` set, `git log --show-signature` fetches unknown keys on its own.
-
-```bash
-echo "keyserver hkp://127.0.0.1:11371" >> ~/.gnupg/dirmngr.conf && gpgconf --kill dirmngr
-```
-
-Search by fingerprint, key ID, address, or ENS name. Email search returns nothing, on purpose. There is no upload: keys are published by attesting, so nobody can attach anything to yours. A fetch by full fingerprint is self-authenticating, gpg checks the key hashes to what it asked for, so a keyserver can withhold but never substitute. Thurin runs one at `hkps://keys.thurin.id` for people without the CLI (write the scheme; a bare hostname means plain HKP on port 11371 to gpg); the local one is the real thing.
+It answers gpg from the registry: no database, no uploads, no email search. Put it in `~/.gnupg/dirmngr.conf` and `--refresh-keys` picks up revocations. A fetch by full fingerprint checks itself, so a keyserver can withhold a key but never swap one. Thurin runs one at `hkps://keys.thurin.id`.
 
 ## Run a relayer
 
-A relayer is `thurin submit` behind an HTTP port: it accepts the same JSON a hand-off link carries, runs the same checks, and pays for the `…For` call from a hot keystore, within limits you set.
-
 ```bash
-thurin wallet create hot                      # fund it with pocket money
-thurin relay --account hot --budget 0.01      # ETH per day; also --free-attests 1, --per-hour 10, --port 8787
+thurin wallet create hot                     # fund it with pocket money
+thurin relay --account hot --budget 0.01     # ETH per day
 ```
 
-Then `thurin attest --authorize --relayer https://relay.example` publishes without a link, and `"relayer"` in `~/.config/thurin/config.json` makes that the default (`--no-relayer` gets a link anyway). `GET /` reports the budget and what's been spent.
-
-This is the one command that spends unattended. It spends gas only, one transaction at a time, never more than the budget per rolling day, and refuses calls over 3M gas (`--max-gas`). Treat the key as pocket money: a drained relayer loses its budget, not anyone's identity. Put nginx or another TLS proxy in front; it listens on localhost by default and trusts `X-Forwarded-For` for rate limits.
-
-## Keys
-
-```bash
-thurin key list                      # your keys, which have a published name, how many proofs
-gpg --quick-add-uid <fpr> "Your Name"  # give an email-only key a name to publish under
-thurin key export <fpr>              # the minimal armored export
-thurin key fetch bendoubleu.eth      # the key stored on-chain for an identity; --import puts it in your keyring
-thurin key default <fpr>
-```
-
-## Wallet (not a wallet)
-
-```bash
-thurin wallet create <name>          # BIP-39 mnemonic → V3 keystore under ~/.config/thurin/keystores
-thurin wallet import <name>          # a private key, a mnemonic, or --from <keystore.json>
-thurin wallet list
-thurin wallet export <name>          # the encrypted V3 file; --private-key prints the key (it warns)
-thurin wallet default <name>
-```
-
-Keystores are the same format `cast`, geth, and every wallet import. `--password-file <path>` (mode 0600) for non-interactive use.
+It takes permissions over HTTP, runs the same checks as `submit`, and pays from the hot keystore: within the daily budget, one free `attest` per address (`--free-attests`), 10 requests an hour per caller (`--per-hour`), and 6M gas per transaction (`--max-gas`). It's the one command that spends without asking. Put a TLS proxy in front; it listens on localhost. People use it with `--relayer <url>`.
 
 ## Networks
 
-`--network mainnet|sepolia|local` (local = a running anvil), `--rpc <url>` for your own node. Defaults live in `~/.config/thurin/config.json`. The registry (PGPRegistry v3) is at `0xFa6956c11163517249f8A67F5560a4406B519451` on Ethereum mainnet and Sepolia.
+`--network mainnet|sepolia|local` (local is anvil on 8545), `--rpc <url>` for your own node. Defaults live in `~/.config/thurin/config.json`. The registry is `0xFa6956c11163517249f8A67F5560a4406B519451`, the same address on Ethereum mainnet and Sepolia.
 
-## What's next
-
-`init` (one guided run) and `--anon` (fresh keys, no proofs, Tor by default). See the [roadmap](https://docs.thurin.id/#/roadmap).
+Exit codes: 0 ok · 1 a check failed · 2 usage · 3 chain or network error.
 
 ## Development
 
 ```bash
-git clone https://github.com/thurinlabs/identity-kit && (cd identity-kit && npm install && npm run build)
 git clone https://github.com/thurinlabs/thurin-cli && cd thurin-cli && npm install
 npm run dev -- status thurinlabs.eth
 npm test

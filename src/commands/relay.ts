@@ -19,7 +19,7 @@ import { CliError, EXIT, ok, warn, bold, dim, label } from '../lib/output.js'
  * you set, from a key you should treat as pocket money.
  */
 
-const MAX_BODY = 64 * 1024   // a hand-off is ~2–12 KB; the registry caps the key at 8 KB anyway
+const MAX_BODY = 64 * 1024   // a hand-off is ~2–50 KB; the registry caps key + signature at 24,000 bytes
 
 export async function relay(_args: string[], opts: Record<string, any>) {
   const ctx = chainCtx(opts)

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { type Address } from 'viem'
 import { chainCtx, claimsOf, resolveOwners, detectLookup, readRegistry, type ChainCtx } from '../lib/chain.js'
-import { parsePointer, addPointer, renderPointer, checkKindName, checkRecordValue, KNOWN_KINDS } from '@thurinlabs/identity-kit/core'
+import { parseReleases, addRelease, renderReleases, checkKindName, checkRecordValue, KNOWN_KINDS } from '@thurinlabs/identity-kit/core'
 import { send, ownerFor, pickIndex, handoff, authorize } from './attest.js'
 import { out, info, ok, bad, dim, bold, label, isJson, CliError, EXIT } from '../lib/output.js'
 
@@ -11,7 +11,7 @@ export async function record(args: string[], opts: Record<string, any>) {
     case 'get': return recordGet(args.slice(1), opts)
     case 'set': return recordSet(args.slice(1), opts)
     case 'clear': return recordSet([args[1], ''], opts)
-    case 'add-release': return addRelease(args.slice(1), opts)
+    case 'add-release': return addReleaseCommand(args.slice(1), opts)
     default: throw new CliError('Usage: thurin record <get <identity> [kind] | set <kind> <value|--file f> | clear <kind> | add-release <name> <SHA256SUMS> [--url u]> [--index n]', EXIT.USAGE)
   }
 }
@@ -45,7 +45,7 @@ async function recordGet(args: string[], opts: Record<string, any>) {
     const r = results[0]
     process.stderr.write(dim(`${r.owner}  claim #${r.index}  ${r.fingerprint}  ${r.kind}`) + '\n')
     // The release list reads as a list at a terminal; piped, it stays the JSON as stored.
-    if (r.kind === 'thurin.pointer' && process.stdout.isTTY) { try { process.stdout.write(renderPointer(parsePointer(r.value)) + '\n'); return } catch { /* shown as stored */ } }
+    if (r.kind === 'thurin.releases' && process.stdout.isTTY) { try { process.stdout.write(renderReleases(parseReleases(r.value)) + '\n'); return } catch { /* shown as stored */ } }
     process.stdout.write(r.value.endsWith('\n') ? r.value : r.value + '\n')
     return
   }
@@ -57,7 +57,7 @@ async function recordGet(args: string[], opts: Record<string, any>) {
     const width = Math.max(...rs.map(r => r.kind.length))
     const lines = rs.map(r => {
       let text = r.value
-      if (r.kind === 'thurin.pointer') { try { text = renderPointer(parsePointer(r.value)) } catch { /* shown as stored */ } }
+      if (r.kind === 'thurin.releases') { try { text = renderReleases(parseReleases(r.value)) } catch { /* shown as stored */ } }
       text = text.replace(/\s+$/, '')
       return text.includes('\n')
         ? `  ${bold(r.kind)}\n${text.split('\n').map(l => (l ? `      ${l}` : '')).join('\n')}`
@@ -90,10 +90,10 @@ async function recordSet(args: string[], opts: Record<string, any>) {
 
 /**
  * thurin record add-release <name> <SHA256SUMS> [--url u] [--index n]: hash the checksum file,
- * append it to the thurin.pointer record (newest first), and set it. What the chain then says:
+ * append it to the thurin.releases record (newest first), and set it. What the chain then says:
  * this identity put out <name>, whose checksum file hashes to this.
  */
-async function addRelease(args: string[], opts: Record<string, any>) {
+async function addReleaseCommand(args: string[], opts: Record<string, any>) {
   if (!args[0] || !args[1]) throw new CliError('Usage: thurin record add-release <name> <path/to/SHA256SUMS> [--url <release url>] [--index n]', EXIT.USAGE)
   const name = args[0]
   const sha256 = createHash('sha256').update(readFileSync(args[1])).digest('hex')
@@ -102,18 +102,18 @@ async function addRelease(args: string[], opts: Record<string, any>) {
   const claims = await claimsOf(ctx, owner)
   const idx = opts.index !== undefined ? Number(opts.index) : pickIndex(undefined, claims)
   if (!claims[idx]) throw new CliError(`No claim #${idx}`, EXIT.USAGE)
-  const existingText = await readRegistry<string>(ctx, 'recordText', [owner, BigInt(idx), 'thurin.pointer'])
+  const existingText = await readRegistry<string>(ctx, 'recordText', [owner, BigInt(idx), 'thurin.releases'])
   let existing = null
-  if (existingText) { try { existing = parsePointer(existingText) } catch { throw new CliError('The existing thurin.pointer record is not v1; edit it with record set', EXIT.FAILED) } }
-  const { record: rec, dropped } = addPointer(existing, { name, sha256, date: new Date().toISOString().slice(0, 10), ...(opts.url ? { url: opts.url } : {}) })
+  if (existingText) { try { existing = parseReleases(existingText) } catch { throw new CliError('The existing thurin.releases record is not v1; edit it with record set', EXIT.FAILED) } }
+  const { record: rec, dropped } = addRelease(existing, { name, sha256, date: new Date().toISOString().slice(0, 10), ...(opts.url ? { url: opts.url } : {}) })
   const text = JSON.stringify(rec)
   if (!isJson()) {
     process.stderr.write(`${label('claim')}#${idx} ${claims[idx].fingerprint}\n${label('release')}${name}\n${label('sha256')}${sha256}  ${dim(`(of ${args[1]})`)}\n${label('record')}${rec.releases.length} release(s), ${new TextEncoder().encode(text).length} bytes\n`)
     if (dropped.length) process.stderr.write(`${label('dropped')}${dropped.map(d => d.name).join(', ')} ${dim('(record full; they stay in chain history)')}\n`)
   }
-  const o = { ...opts, _record: { kind: 'thurin.pointer', value: text } }
+  const o = { ...opts, _record: { kind: 'thurin.releases', value: text } }
   if (opts.authorize) return authorize(ctx, o, 'set-record', owner, claims[idx].fingerprint, null, idx)
   if (opts.noKey) return handoff(ctx, o, 'set-record', owner, claims[idx].fingerprint, null, idx)
-  const r = await send(ctx, opts, 'setRecord', [BigInt(idx), 'thurin.pointer', text], `Name release "${name}" on claim #${idx}`)
-  out({ ...r, owner, index: idx, name, sha256, releases: rec.releases.length }, () => `${ok('Named')} ${bold(name)} on-chain\n${label('tx')}${ctx.explorerUrl ? `${ctx.explorerUrl}/tx/${r.hash}` : r.hash}\n${label('check')}thurin record get ${owner} thurin.pointer`)
+  const r = await send(ctx, opts, 'setRecord', [BigInt(idx), 'thurin.releases', text], `Name release "${name}" on claim #${idx}`)
+  out({ ...r, owner, index: idx, name, sha256, releases: rec.releases.length }, () => `${ok('Named')} ${bold(name)} on-chain\n${label('tx')}${ctx.explorerUrl ? `${ctx.explorerUrl}/tx/${r.hash}` : r.hash}\n${label('check')}thurin record get ${owner} thurin.releases`)
 }

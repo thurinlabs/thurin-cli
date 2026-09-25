@@ -45,7 +45,7 @@ export interface Handoff {
   reason?: RevokeReason
   /** Claim index to replace (reattest), update (update-key), revoke, set a record on, or mark compromised. */
   index?: number
-  /** set-record: the record name as submitted (e.g. pointer or thurin.pointer) and text value ('' clears). */
+  /** set-record: the record name as submitted (e.g. canary or thurin.canary) and text value ('' clears). */
   kind?: string
   value?: string
   includeEmail: boolean

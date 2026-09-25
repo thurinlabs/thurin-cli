@@ -120,7 +120,7 @@ More: thurin help no-eth   (your ETH is elsewhere, or you have none)
   thurin record get <identity> [<name>]
       Anyone can read. Without a name, every record on the claim. With one,
       just its value, so it pipes: … get <identity> canary | gpg --verify
-      (the release list, pointer, shows as a list at a terminal)
+      (releases shows as a list at a terminal)
 
   thurin record set <name> <value | --file f>
       A name without a dot gets thurin. in front.
@@ -154,7 +154,7 @@ More: thurin help no-eth   (your ETH is elsewhere, or you have none)
       --budget 0.01       ETH per day
       --free-attests 1    per address
       --per-hour 10       requests per caller
-      --max-gas 3000000   per transaction
+      --max-gas 6000000   per transaction
       --port 8787
 `,
   options: `${bold('Options')}
