@@ -1,6 +1,6 @@
-import { identifyProof, verifyProof, displayUrl, claimCheckText, expiresSoon, claimFates, keyIdOf, CLAIM_LIMIT, type ClaimFate, type PGPVerification } from '@thurinlabs/identity-kit/core'
+import { sameFingerprint, identifyProof, verifyProof, displayUrl, claimCheckText, expiresSoon, claimFates, keyIdOf, CLAIM_LIMIT, type ClaimFate, type PGPVerification } from '@thurinlabs/identity-kit/core'
 import { listKeystores } from '../lib/keystore.js'
-import { chainCtx, claimsOf, detectLookup, resolveOwners, ensNameOf, sameKey, type Claim } from '../lib/chain.js'
+import { chainCtx, claimsOf, detectLookup, resolveOwners, ensNameOf, type Claim } from '../lib/chain.js'
 import { out, ok, bad, dim, bold, label, CliError, EXIT } from '../lib/output.js'
 import { ensHintOf, renderHint } from './ens.js'
 
@@ -17,7 +17,7 @@ export async function status(args: string[], opts: Record<string, any>) {
     const name = ensName ?? await ensNameOf(ctx, owner)
     // The claim to show: when the query names a key, that key's claim; else the newest verified one.
     const active = claims.filter(c => !c.revokedAt && c.verification?.verified)
-    const current = (lookup.type === 'fingerprint' ? active.find(c => sameKey(c.fingerprint, lookup.value))
+    const current = (lookup.type === 'fingerprint' ? active.find(c => sameFingerprint(c.fingerprint, lookup.value))
       : lookup.type === 'keyId' ? active.find(c => keyIdOf(c.fingerprint).slice(2) === lookup.value.toLowerCase())
       : null) ?? active[active.length - 1] ?? null
     // --no-proofs: ask nothing but the Ethereum node (each proof platform would see the lookup).

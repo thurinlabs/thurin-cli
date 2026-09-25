@@ -12,7 +12,7 @@ import { CliError, EXIT, ok, warn, bold, dim, label } from '../lib/output.js'
 import { listen } from '../lib/listen.js'
 
 /**
- * thurin relay — `thurin submit` behind an HTTP port. Accepts the same JSON a hand-off
+ * thurin relay: `thurin submit` behind an HTTP port. Accepts the same JSON a hand-off
  * link carries, runs the same checks, applies a budget and rate limits, and pays for the
  * `…For` call from a hot keystore. Anyone can run one; Thurin runs one with a small budget.
  *

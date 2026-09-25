@@ -15,7 +15,7 @@ const h: Handoff = {
   includeEmail: false,
 }
 const REGISTRY = '0xFa6956c11163517249f8A67F5560a4406B519451'
-// Hardhat/anvil account #0 — a well-known test key, never funded on a real network.
+// Hardhat/anvil account #0: a well-known test key, never funded on a real network.
 const acct = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80')
 
 describe('hand-off link', () => {

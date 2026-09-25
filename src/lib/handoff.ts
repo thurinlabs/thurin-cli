@@ -96,7 +96,7 @@ export function decodeHandoff(encoded: string): Handoff {
   return h as Handoff
 }
 
-/** `https://thurin.id/attest#handoff=…` — the site's path routing keeps /attest; the fragment stays local. */
+/** `https://thurin.id/attest#handoff=…`: the fragment never leaves the browser. */
 export function handoffUrl(site: string, h: Handoff): string {
   return `${site.replace(/\/+$/, '')}/attest#${HANDOFF_PARAM}=${encodeHandoff(h)}`
 }

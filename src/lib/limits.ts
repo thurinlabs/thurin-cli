@@ -1,6 +1,6 @@
 /**
  * What a relayer refuses before it spends: a daily gas budget, one free `attest` per
- * address, and a per-caller rate. All in memory — a restart forgets, which errs toward
+ * address, and a per-caller rate. All in memory: a restart forgets, which errs toward
  * generosity and needs no database. The chain is the record of what was actually paid.
  */
 export interface LimitsConfig {
@@ -11,9 +11,8 @@ export interface LimitsConfig {
   /** `attest` calls per owner address, ever (per process). Other ops are rate-limited only. */
   attestsPerOwner: number
   /**
-   * Hard cap on gas per transaction; bounds an owner whose contract wallet burns gas in
-   * isValidSignature. An attest stores the key + signature (SSTORE2, ~200 gas/byte): ~430k
-   * for an Ed25519 key, ~1.1M for a large RSA one, ~5.5M at the registry's 24,000-byte limit. 6M covers every honest call.
+   * Hard cap on gas per transaction, against an owner's contract wallet burning gas in
+   * isValidSignature. A claim at the registry's 24,000-byte limit takes ~5.5M; 6M covers every honest call.
    */
   maxGas: bigint
 }

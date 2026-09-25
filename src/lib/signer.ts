@@ -87,5 +87,5 @@ export function parseSignature(text: string): Hex {
 
 export function readSignatureFile(path: string): Hex { return parseSignature(readFileSync(path, 'utf8')) }
 
-/** BigInts (nonce, deadline, index) become decimal strings — what every EIP-712 tool expects. */
+/** BigInts (nonce, deadline, index) as decimal strings, which every EIP-712 tool expects. */
 export function bigintReplacer(_k: string, v: unknown) { return typeof v === 'bigint' ? v.toString() : v }

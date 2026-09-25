@@ -1,13 +1,13 @@
 import { encodeFunctionData, getAddress, isAddress, type Address } from 'viem'
 import { normalize } from 'viem/ens'
-import { chainCtx, claimsOf, rpcHost, sameKey, type ChainCtx, type Claim } from '../lib/chain.js'
-import { ENS_HINT_KEY, ensHintFor, ensHintWrite, type EnsHint } from '@thurinlabs/identity-kit/core'
+import { chainCtx, claimsOf, rpcHost, type ChainCtx, type Claim } from '../lib/chain.js'
+import { sameFingerprint, ENS_HINT_KEY, ensHintFor, ensHintWrite, type EnsHint } from '@thurinlabs/identity-kit/core'
 import { send } from './attest.js'
 import { out, ok, bad, dim, bold, label, isJson, CliError, EXIT } from '../lib/output.js'
 
 /**
  * thurin ens check <name>: does the name's id.thurin record point at the key its address claims?
- * thurin ens link <name> [--key <fpr>] [--calldata]: set it — from the keystore, or print the
+ * thurin ens link <name> [--key <fpr>] [--calldata]: set it from the keystore, or print the
  * transaction for the wallet that manages the name.
  */
 export async function ens(args: string[], opts: Record<string, any>) {
@@ -33,7 +33,7 @@ async function resolveName(ctx: ChainCtx, name: string): Promise<{ name: string;
 function pickClaim(claims: Claim[], wanted?: string): Claim | null {
   const active = claims.filter(c => !c.revokedAt && c.verification?.verified)
   if (wanted) {
-    const c = active.find(c => sameKey(c.fingerprint, wanted))
+    const c = active.find(c => sameFingerprint(c.fingerprint, wanted))
     if (!c) throw new CliError(`This address has no active, verified claim for ${wanted}`, EXIT.USAGE)
     return c
   }

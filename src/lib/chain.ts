@@ -1,7 +1,7 @@
 import { createPublicClient, http, type Address, type Hex, type PublicClient, type Chain } from 'viem'
 import { normalize } from 'viem/ens'
 import {
-  REGISTRY_ABI, getRegistry, chainFor, isNetworkName, parsePgpKey, readClaims, findOwners, normalizeFingerprint,
+  REGISTRY_ABI, getRegistry, chainFor, isNetworkName, parsePgpKey, readClaims, findOwners,
   type NetworkName, type PGPKeyInfo, type Attestation,
 } from '@thurinlabs/identity-kit/core'
 import { readConfig } from './config.js'
@@ -39,12 +39,6 @@ export async function claimsOf(ctx: ChainCtx, owner: Address): Promise<Claim[]> 
   return Promise.all(claims.map(async c => ({
     ...c, fingerprint: c.fingerprint.toUpperCase(), keyInfo: c.pgpPublicKey ? await parsePgpKey(c.pgpPublicKey) : null,
   })))
-}
-
-/** Same key, whatever the case, spacing, or 0x of either side. */
-export function sameKey(a: string | null | undefined, b: string | null | undefined): boolean {
-  const x = a ? normalizeFingerprint(a) : null
-  return x !== null && x === (b ? normalizeFingerprint(b) : null)
 }
 
 export async function readRegistry<T>(ctx: ChainCtx, functionName: string, args: unknown[]): Promise<T> {

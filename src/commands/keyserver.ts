@@ -1,13 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
 import type { Address } from 'viem'
-import { keyIdOf } from '@thurinlabs/identity-kit/core'
-import { chainCtx, claimsOf, resolveOwners, detectLookup, ensNameOf, sameKey, type ChainCtx, type Claim } from '../lib/chain.js'
+import { sameFingerprint, keyIdOf } from '@thurinlabs/identity-kit/core'
+import { chainCtx, claimsOf, resolveOwners, detectLookup, ensNameOf, type ChainCtx, type Claim } from '../lib/chain.js'
 import { CliError, EXIT, ok, bold, dim, label } from '../lib/output.js'
 import { listen } from '../lib/listen.js'
 
 /**
- * thurin keyserver — the registry served over HKP, the protocol gpg has spoken since the
+ * thurin keyserver: the registry served over HKP, the protocol gpg has spoken since the
  * 1990s. Point dirmngr at it (`keyserver hkp://127.0.0.1:11371`) and every --recv-keys,
  * --refresh-keys, --locate-keys, and auto-key-retrieve on the machine reads Ethereum.
  *
@@ -103,22 +103,18 @@ export async function keyserver(_args: string[], opts: Record<string, any>) {
 
 interface Entry { fingerprint: string; armored: string; algo: number; bits: number; created: number; expires: number | ''; revoked: boolean; uids: string[]; owner: Address }
 
-/** Every verified, active key for a search term: fingerprint, key ID, address, or (mainnet) ENS name. */
 /**
- * The search terms served: fingerprint, key ID (gpg sends both 0x-prefixed), address, ENS.
- * Email and free text return nothing, by design: emails are off-chain unless the owner chose
- * otherwise, and fingerprint / key ID were the only keyserver searches that were ever safe.
+ * The search terms served: fingerprint, key ID, address, ENS. Email and free text find nothing:
+ * emails are off-chain unless the owner chose otherwise.
  */
 export function hkpSearchTerm(search: string): string {
-  // gpg sends 0x + 16 hex for a key ID and 0x + 40 hex for a fingerprint; an Ethereum address is
-  // also 0x + 40 hex. A bare 40-hex is treated as a fingerprint, 0x-prefixed as an address, so
-  // only the key-ID form loses its prefix here. Fingerprint lookups from gpg still work because
-  // an address that has no claim falls through to nothing, and gpg always sends the full 0x40.
+  // Only a key ID loses its 0x: 0x + 40 hex could be a fingerprint or an address, and find() tries both.
   const q = search.trim().replace(/^0x(?=[0-9a-fA-F]{16}$)/, '')
   if (!/^([0-9a-fA-F]{16}|[0-9a-fA-F]{40}|0x[0-9a-fA-F]{40}|[a-z0-9-]+(\.[a-z0-9-]+)+)$/i.test(q)) throw new CliError("Emails aren't on-chain. Search by fingerprint, key ID, address, or ENS name", EXIT.USAGE)
   return q
 }
 
+/** Every verified, active key for a search term. */
 export async function find(ctx: ChainCtx, search: string): Promise<Entry[]> {
   const q = hkpSearchTerm(search)
   // 0x + 40 hex is how gpg spells a fingerprint, and also an Ethereum address. Try it as a
@@ -136,11 +132,10 @@ export async function find(ctx: ChainCtx, search: string): Promise<Entry[]> {
   const out: Entry[] = []
   for (const owner of owners) {
     const claims = await claimsOf(ctx, owner)
-    // Current-only: the active, verified claim per key. Revoked history is not served — a
-    // `--refresh-keys` against a revoked key gets 404, which is the point.
+    // The active, verified claim per key only: `--refresh-keys` on a revoked key gets 404, which is the point.
     const current = claims.filter(c => !c.revokedAt && c.verification?.verified && c.pgpPublicKey)
     for (const c of current) {
-      if (lookup.type === 'fingerprint' && !sameKey(c.fingerprint, lookup.value)) continue
+      if (lookup.type === 'fingerprint' && !sameFingerprint(c.fingerprint, lookup.value)) continue
       out.push(toEntry(c, owner))
     }
   }

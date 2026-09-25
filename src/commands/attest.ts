@@ -1,11 +1,11 @@
 import { toHex, encodeFunctionData, isAddress, getAddress, recoverTypedDataAddress, type Address } from 'viem'
 import { writeFileSync, readFileSync } from 'node:fs'
 import { normalize } from 'viem/ens'
-import {
+import { sameFingerprint,
   REGISTRY_ABI, parsePgpKey, verifyAttestation, leanKey, claimSignature, signatureEmail, identifyProof, fingerprintToBytes, OWNER_REVOKE_REASONS,
   type RevokeReason,
 } from '@thurinlabs/identity-kit/core'
-import { chainCtx, claimsOf, readRegistry, sameKey, type ChainCtx } from '../lib/chain.js'
+import { chainCtx, claimsOf, readRegistry, type ChainCtx } from '../lib/chain.js'
 import { findKey, detachSign, exportMinimal, attestStatement, MAKE_KEY_HINT, addNameHint } from '../lib/gpg.js'
 import { loadAccount } from '../lib/keystore.js'
 import { accountSigner, commandSigner, fileSigner, providedSigner, readSignatureFile, readSignOut, SignLater, type Signer } from '../lib/signer.js'
@@ -244,7 +244,7 @@ export async function authorize(ctx: ChainCtx, opts: Record<string, any>, op: Ha
     }
     throw e
   }
-  // Prove it back before handing it out — whoever signed, this is the check that matters.
+  // Prove it back before handing it out: whoever signed, this is the check that matters.
   const recovered = await recoverTypedDataAddress({ ...(typed as any), signature: h.authorization.signature })
   if (recovered.toLowerCase() !== owner.toLowerCase()) throw new CliError(`The signature is from ${recovered}, not ${owner}, so it won't be handed out`, EXIT.FAILED)
   // Would the registry take it right now? (nonce, index, duplicate-claim rules; simulated from the owner, which needs no ETH)
@@ -372,7 +372,7 @@ export async function attest(_args: string[], opts: Record<string, any>) {
   const owner = pre ? await presignedOwner(ctx, opts) : await ownerFor(ctx, opts)
   await checkKeyClaimable(ctx, owner, fpr)
   const existing = (await claimsOf(ctx, owner)).filter(c => !c.revokedAt)
-  const dup = existing.find(c => sameKey(c.fingerprint, fpr))
+  const dup = existing.find(c => sameFingerprint(c.fingerprint, fpr))
   if (dup) throw new CliError(`${owner} already has an active claim for ${fpr} (#${dup.index}). New names or proofs on it: thurin update-key ${dup.index}`, EXIT.FAILED)
   const p = await preflight(owner, fpr, !!opts.includeEmail, true, pre)
   if (!isJson()) process.stderr.write(summary(p) + '\n')
@@ -414,7 +414,7 @@ export async function reattest(args: string[], opts: Record<string, any>) {
   if (claims[idx].revokedAt) throw new CliError(`Claim #${idx} is already revoked`, EXIT.FAILED)
   await checkKeyClaimable(ctx, owner, fpr)
   // A canary moving to a claim with a different key was signed by the old one: say so, as the site does.
-  if (!opts.dropRecords && !sameKey(claims[idx].fingerprint, fpr)) {
+  if (!opts.dropRecords && !sameFingerprint(claims[idx].fingerprint, fpr)) {
     const [names] = await readRegistry<[string[], string[]]>(ctx, 'recordsOf', [owner, BigInt(idx)])
     if (names.includes('thurin.canary')) info(`Your canary was signed by the old key. After this, set a new one signed with ${fpr}.`)
   }
@@ -423,7 +423,7 @@ export async function reattest(args: string[], opts: Record<string, any>) {
   if (opts.compromised && (opts.authorize || opts.noKey)) throw new CliError('--compromised sends two calls in one transaction from this keystore; with --authorize or --no-key, reattest first, then: thurin revoke <old index> --reason compromised', EXIT.USAGE)
   if (opts.authorize) return authorize(ctx, opts, 'reattest', owner, fpr, p, idx)
   if (opts.noKey) return handoff(ctx, opts, 'reattest', owner, fpr, p, idx)
-  if (opts.compromised && sameKey(claims[idx].fingerprint, fpr)) throw new CliError('--compromised needs a different key: the old key would stay in use', EXIT.USAGE)
+  if (opts.compromised && sameFingerprint(claims[idx].fingerprint, fpr)) throw new CliError('--compromised needs a different key: the old key would stay in use', EXIT.USAGE)
   const reattestArgs = [BigInt(idx), fingerprintToBytes(fpr), payloadArg(p.signature!), p.key, !opts.dropRecords] as const
   const what = `Revoke #${idx} and publish a new claim${opts.dropRecords ? '' : ' (its records move to the new one)'}${opts.compromised ? `; mark ${claims[idx].fingerprint} compromised (this address can never claim it again)` : ''}`
   const r = opts.compromised
@@ -448,7 +448,7 @@ export async function revoke(args: string[], opts: Record<string, any>) {
   const late = !!c.revokedAt
   if (late && reason !== 'compromised') throw new CliError(`Claim #${idx} is already revoked. Found out its key was compromised? thurin revoke ${idx} --reason compromised`, EXIT.FAILED)
   if (late && c.revokeReason === 'compromised') throw new CliError(`Claim #${idx} is already marked compromised`, EXIT.FAILED)
-  if (late && claims.some(o => !o.revokedAt && sameKey(o.fingerprint, c.fingerprint))) throw new CliError(`${c.fingerprint} still has an active claim here; revoke that one as compromised first`, EXIT.FAILED)
+  if (late && claims.some(o => !o.revokedAt && sameFingerprint(o.fingerprint, c.fingerprint))) throw new CliError(`${c.fingerprint} still has an active claim here; revoke that one as compromised first`, EXIT.FAILED)
   if (opts.authorize) return authorize(ctx, opts, late ? 'mark-compromised' : 'revoke', owner, c.fingerprint, null, idx)
   const what = late ? `Mark claim #${idx}'s key (${c.fingerprint}) as compromised; this address can never claim it again` : `Revoke claim #${idx} (${c.fingerprint})${reason ? ` as ${reason}` : ''}${reason === 'compromised' ? '; this address can never claim it again' : ''}`
   const r = await send(ctx, opts, 'revoke', [BigInt(idx), reason], what)
