@@ -44,6 +44,8 @@ async function recordGet(args: string[], opts: Record<string, any>) {
   if (kind && results.length === 1 && !isJson()) {
     const r = results[0]
     process.stderr.write(dim(`${r.owner}  claim #${r.index}  ${r.fingerprint}  ${r.kind}`) + '\n')
+    // The release list reads as a list at a terminal; piped, it stays the JSON as stored.
+    if (r.kind === 'thurin.pointer' && process.stdout.isTTY) { try { process.stdout.write(renderPointer(parsePointer(r.value)) + '\n'); return } catch { /* shown as stored */ } }
     process.stdout.write(r.value.endsWith('\n') ? r.value : r.value + '\n')
     return
   }
