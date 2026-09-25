@@ -1,9 +1,8 @@
 import { createPublicClient, http, type Address, type Hex, type PublicClient, type Chain } from 'viem'
 import { normalize } from 'viem/ens'
 import {
-  REGISTRY_ABI, getRegistry, chainFor, isNetworkName, parsePgpKey, verifyAttestation, payloadText,
-  bytesToFingerprint, fingerprintToBytes, keyIdToBytes,
-  type NetworkName, type PGPKeyInfo, type PGPVerification,
+  REGISTRY_ABI, getRegistry, chainFor, isNetworkName, parsePgpKey, readClaims, findOwners, normalizeFingerprint,
+  type NetworkName, type PGPKeyInfo, type Attestation,
 } from '@thurinlabs/identity-kit/core'
 import { readConfig } from './config.js'
 import { CliError, EXIT } from './output.js'
@@ -30,57 +29,32 @@ export function chainCtx(opts: { network?: string; rpc?: string; site?: string }
   return { network: net, rpcUrl, client, registry: reg.address as Address, explorerUrl: reg.explorerUrl, site: site ? site.replace(/\/+$/, '') : null }
 }
 
-/** A claim as the CLI shows it: the on-chain row plus the stored key and signature, and their verification. */
-export interface Claim {
-  index: number
-  fingerprint: string
-  createdAt: number
-  revokedAt: number | null
-  state: 'active' | 'revoked' | 'replaced'
-  replacedBy: number | null
-  revokeReason: string
-  messageVersion: number
-  /** The key exactly as stored, 0x hex. */
-  keyHex: Hex | null
-  /** The key as armored text. */
-  pgpPublicKey: string | null
-  /** The signature as armored text, or the stored clearsigned message. */
-  pgpSignature: string | null
-  verification: PGPVerification | null
-  keyInfo: PGPKeyInfo | null
-}
+/** A claim as the CLI shows it: the kit's, with the fingerprint uppercase as gpg prints it, and the key parsed. */
+export type Claim = Attestation & { keyInfo: PGPKeyInfo | null }
 
 export async function claimsOf(ctx: ChainCtx, owner: Address): Promise<Claim[]> {
-  const rows = await readRegistry<any[]>(ctx, 'claimsOf', [owner])
-  const claims: Claim[] = []
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i]
-    const fingerprint = bytesToFingerprint(r.fingerprint).toUpperCase()
-    let keyHex: Hex | null = null, pgpPublicKey: string | null = null, pgpSignature: string | null = null
-    try {
-      keyHex = await readRegistry<Hex>(ctx, 'keyBytes', [owner, BigInt(i)])
-      pgpPublicKey = await payloadText(keyHex, 'key')
-      pgpSignature = await payloadText(await readRegistry<Hex>(ctx, 'signatureBytes', [owner, BigInt(i)]), 'signature')
-    } catch { /* unreadable: shown as unverified */ }
-    const verification = pgpPublicKey && pgpSignature
-      ? await verifyAttestation({ pgpPublicKey, pgpSignature, fingerprint, ethAddress: owner })
-      : { verified: false, reason: 'No PGP data stored' }
-    const keyInfo = pgpPublicKey ? await parsePgpKey(pgpPublicKey) : null
-    claims.push({
-      index: i, fingerprint, createdAt: Number(r.createdAt), revokedAt: Number(r.revokedAt) || null,
-      state: r.state, replacedBy: r.state === 'replaced' ? Number(r.replacedBy) : null, revokeReason: r.revokeReason,
-      messageVersion: Number(r.messageVersion), keyHex, pgpPublicKey, pgpSignature, verification, keyInfo,
-    })
-  }
-  return claims
+  let claims: Attestation[]
+  try { claims = await readClaims(ctx.client, owner, { registry: ctx.registry }) }
+  catch (err) { throw readError(ctx, err) }
+  return Promise.all(claims.map(async c => ({
+    ...c, fingerprint: c.fingerprint.toUpperCase(), keyInfo: c.pgpPublicKey ? await parsePgpKey(c.pgpPublicKey) : null,
+  })))
+}
+
+/** Same key, whatever the case, spacing, or 0x of either side. */
+export function sameKey(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = a ? normalizeFingerprint(a) : null
+  return x !== null && x === (b ? normalizeFingerprint(b) : null)
 }
 
 export async function readRegistry<T>(ctx: ChainCtx, functionName: string, args: unknown[]): Promise<T> {
   try {
     return await ctx.client.readContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName, args } as any) as T
-  } catch (err: any) {
-    throw new CliError(`Couldn't read the registry on ${ctx.network} via ${rpcHost(ctx.rpcUrl)} (${err.shortMessage || err.message}). Try again, or --rpc <url>`, EXIT.CHAIN)
-  }
+  } catch (err) { throw readError(ctx, err) }
+}
+
+function readError(ctx: ChainCtx, err: any): CliError {
+  return new CliError(`Couldn't read the registry on ${ctx.network} via ${rpcHost(ctx.rpcUrl)} (${err.shortMessage || err.message}). Try again, or --rpc <url>`, EXIT.CHAIN)
 }
 
 export type Lookup = { type: 'address' | 'ens' | 'fingerprint' | 'keyId'; value: string }
@@ -105,19 +79,11 @@ export async function resolveOwners(ctx: ChainCtx, lookup: Lookup): Promise<{ ow
     if (!addr) throw new CliError(`${lookup.value} does not resolve to an address`, EXIT.FAILED)
     return { owners: [addr], ensName: lookup.value }
   }
-  let fps: `0x${string}`[]
-  if (lookup.type === 'keyId') {
-    const kid = keyIdToBytes(lookup.value)
-    if (!kid) throw new CliError('Invalid key ID', EXIT.USAGE)
-    fps = await readRegistry(ctx, 'fingerprintsForKeyId', [kid])
-    if (!fps.length) throw new CliError(`No claim in the registry for key ID ${lookup.value}`, EXIT.FAILED)
-  } else {
-    fps = [fingerprintToBytes(lookup.value) as `0x${string}`]
-  }
-  const owners: Address[] = []
-  for (const fp of fps) owners.push(...await readRegistry<Address[]>(ctx, 'ownersOf', [fp]))
-  if (!owners.length) throw new CliError(`No claim in the registry for fingerprint ${lookup.value}`, EXIT.FAILED)
-  return { owners: [...new Set(owners)] }
+  let found: { owner: Address }[]
+  try { found = await findOwners(ctx.client, lookup.type === 'keyId' ? { keyId: lookup.value } : { fingerprint: lookup.value }, { registry: ctx.registry }) }
+  catch (err) { throw readError(ctx, err) }
+  if (!found.length) throw new CliError(`No claim in the registry for ${lookup.type === 'keyId' ? 'key ID' : 'fingerprint'} ${lookup.value}`, EXIT.FAILED)
+  return { owners: [...new Set(found.map(f => f.owner))] }
 }
 
 export async function ensNameOf(ctx: ChainCtx, address: Address): Promise<string | null> {

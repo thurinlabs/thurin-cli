@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
 import type { Address } from 'viem'
-import { chainCtx, claimsOf, resolveOwners, detectLookup, ensNameOf, type ChainCtx, type Claim } from '../lib/chain.js'
+import { keyIdOf } from '@thurinlabs/identity-kit/core'
+import { chainCtx, claimsOf, resolveOwners, detectLookup, ensNameOf, sameKey, type ChainCtx, type Claim } from '../lib/chain.js'
 import { CliError, EXIT, ok, bold, dim, label } from '../lib/output.js'
 import { listen } from '../lib/listen.js'
 
@@ -139,7 +140,7 @@ export async function find(ctx: ChainCtx, search: string): Promise<Entry[]> {
     // `--refresh-keys` against a revoked key gets 404, which is the point.
     const current = claims.filter(c => !c.revokedAt && c.verification?.verified && c.pgpPublicKey)
     for (const c of current) {
-      if (lookup.type === 'fingerprint' && c.fingerprint !== lookup.value) continue
+      if (lookup.type === 'fingerprint' && !sameKey(c.fingerprint, lookup.value)) continue
       out.push(toEntry(c, owner))
     }
   }
@@ -180,7 +181,7 @@ const spaced = (fpr: string) => fpr.replace(/(.{4})/g, '$1 ').trim().replace(/^(
 export function indexListing(entries: Entry[], names: Map<string, string | null>): string {
   const L: string[] = []
   for (const e of entries) {
-    const keyId = e.fingerprint.slice(-16)
+    const keyId = keyIdOf(e.fingerprint).slice(2).toUpperCase()
     const algo = `${ALGO_NAME[e.algo] ?? 'pgp'}${e.algo === 1 && e.bits ? e.bits : ''}`
     const exp = e.expires ? ` [expires: ${day(e.expires)}]` : ''
     L.push(`pub   ${algo}/<a href="/pks/lookup?op=get&amp;search=0x${e.fingerprint}">${keyId}</a> ${day(e.created)}${exp}`)

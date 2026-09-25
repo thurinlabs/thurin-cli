@@ -1,6 +1,6 @@
-import { identifyProof, verifyProof, displayUrl, claimCheckText, expiresSoon, claimFates, type ClaimFate, type PGPVerification } from '@thurinlabs/identity-kit/core'
+import { identifyProof, verifyProof, displayUrl, claimCheckText, expiresSoon, claimFates, keyIdOf, CLAIM_LIMIT, type ClaimFate, type PGPVerification } from '@thurinlabs/identity-kit/core'
 import { listKeystores } from '../lib/keystore.js'
-import { chainCtx, claimsOf, detectLookup, resolveOwners, ensNameOf, type Claim } from '../lib/chain.js'
+import { chainCtx, claimsOf, detectLookup, resolveOwners, ensNameOf, sameKey, type Claim } from '../lib/chain.js'
 import { out, ok, bad, dim, bold, label, CliError, EXIT } from '../lib/output.js'
 import { ensHintOf, renderHint } from './ens.js'
 
@@ -17,8 +17,8 @@ export async function status(args: string[], opts: Record<string, any>) {
     const name = ensName ?? await ensNameOf(ctx, owner)
     // The claim to show: when the query names a key, that key's claim; else the newest verified one.
     const active = claims.filter(c => !c.revokedAt && c.verification?.verified)
-    const current = (lookup.type === 'fingerprint' ? active.find(c => c.fingerprint === lookup.value)
-      : lookup.type === 'keyId' ? active.find(c => c.fingerprint.endsWith(lookup.value))
+    const current = (lookup.type === 'fingerprint' ? active.find(c => sameKey(c.fingerprint, lookup.value))
+      : lookup.type === 'keyId' ? active.find(c => keyIdOf(c.fingerprint).slice(2) === lookup.value.toLowerCase())
       : null) ?? active[active.length - 1] ?? null
     // --no-proofs: ask nothing but the Ethereum node (each proof platform would see the lookup).
     const offline = !!opts.noProofs
@@ -64,7 +64,7 @@ const CLI_FIX: Partial<Record<NonNullable<PGPVerification['kind']>, string>> = {
 
 /** "✗ key expired 2029-03-05: extend it, …" (the fix only when a keystore here owns the claim). */
 function checkLine(v: PGPVerification | null | undefined, mine: boolean): string {
-  if (!v) return bad('✗ no PGP data stored')
+  if (!v) return dim(`not checked (older than the newest ${CLAIM_LIMIT})`)
   const t = claimCheckText(v, iso => day(iso))
   const when = v.at && t.kind !== 'bad-signature' && t.kind !== 'unsupported' ? ` ${day(v.at)}` : ''
   const extra = t.kind === 'unsupported' && v.algorithm ? ` (${v.algorithm})` : t.kind === 'revoked' && v.revocationReason ? ` (${v.revocationReason})` : ''
@@ -78,7 +78,7 @@ function fateWord(f: ClaimFate | undefined, revoked: boolean): string {
   return revoked ? dim('revoked') : 'active'
 }
 
-function stripKey(c: Claim) { const { pgpPublicKey, pgpSignature, keyInfo, keyHex, ...rest } = c; return { ...rest, userIDs: keyInfo?.userIDs ?? [], algorithm: keyInfo?.algorithm ?? null, expires: keyInfo?.expires ?? null } }
+function stripKey(c: Claim) { const { pgpPublicKey, pgpSignature, keyInfo, ...rest } = c; return { ...rest, userIDs: keyInfo?.userIDs ?? [], algorithm: keyInfo?.algorithm ?? null, expires: keyInfo?.expires ?? null } }
 
 function render(i: any): string {
   const L: string[] = []

@@ -64,4 +64,19 @@ describe('keyserver lookup', () => {
     expect(seen).toEqual([owner.toLowerCase()])
     vi.doUnmock('../src/lib/chain.js')
   })
+
+  it('matches a fingerprint whatever case the claim and the search are in', async () => {
+    vi.resetModules()
+    const owner = '0x539C7e1E454296Dc150B95a0acCC05bCa3b33538'
+    const claim = (fingerprint: string) => ({ fingerprint, revokedAt: null, verification: { verified: true }, pgpPublicKey: 'armored', keyInfo: null, createdAt: 0 })
+    vi.doMock('../src/lib/chain.js', async (orig) => ({
+      ...(await orig<any>()),
+      resolveOwners: async () => ({ owners: [owner] }),
+      claimsOf: async () => [claim('08b9374fdfbec67effa24e669d3d86e35361ef7b'), claim('aa'.repeat(20))],
+    }))
+    const { find } = await import('../src/commands/keyserver.js')
+    const hits = await find({} as any, '0x08B9374FDFBEC67EFFA24E669D3D86E35361EF7B')
+    expect(hits.map(h => h.fingerprint)).toEqual(['08b9374fdfbec67effa24e669d3d86e35361ef7b'])
+    vi.doUnmock('../src/lib/chain.js')
+  })
 })

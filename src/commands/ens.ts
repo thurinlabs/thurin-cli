@@ -1,6 +1,6 @@
 import { encodeFunctionData, getAddress, isAddress, type Address } from 'viem'
 import { normalize } from 'viem/ens'
-import { chainCtx, claimsOf, rpcHost, type ChainCtx, type Claim } from '../lib/chain.js'
+import { chainCtx, claimsOf, rpcHost, sameKey, type ChainCtx, type Claim } from '../lib/chain.js'
 import { ENS_HINT_KEY, ensHintFor, ensHintWrite, type EnsHint } from '@thurinlabs/identity-kit/core'
 import { send } from './attest.js'
 import { out, ok, bad, dim, bold, label, isJson, CliError, EXIT } from '../lib/output.js'
@@ -33,8 +33,7 @@ async function resolveName(ctx: ChainCtx, name: string): Promise<{ name: string;
 function pickClaim(claims: Claim[], wanted?: string): Claim | null {
   const active = claims.filter(c => !c.revokedAt && c.verification?.verified)
   if (wanted) {
-    const w = wanted.replace(/^0x/i, '').replace(/\s+/g, '').toUpperCase()
-    const c = active.find(c => c.fingerprint === w)
+    const c = active.find(c => sameKey(c.fingerprint, wanted))
     if (!c) throw new CliError(`This address has no active, verified claim for ${wanted}`, EXIT.USAGE)
     return c
   }
