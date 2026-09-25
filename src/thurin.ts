@@ -33,7 +33,8 @@ const TOPICS: Record<string, string> = {
   status: `${bold('Look up')}
 
   thurin status <ens|0x|fingerprint|keyid>
-      Claims, verification, proofs, and EFP for anyone. No keystore needed.
+      Claims, verification, and proofs for anyone. No keystore needed.
+      --no-proofs   ask only the Ethereum node: proofs listed, not checked
 `,
   key: `${bold('Your PGP key')}  (gpg does the work)
 
@@ -197,11 +198,11 @@ async function main() {
       authorize: { type: 'boolean' }, deadline: { type: 'string' }, out: { type: 'string' },
       'drop-records': { type: 'boolean' }, reason: { type: 'string' }, compromised: { type: 'boolean' },
       signer: { type: 'string' }, 'sign-out': { type: 'string' }, signature: { type: 'string' }, 'signature-file': { type: 'string' },
-      relayer: { type: 'string' }, 'no-relayer': { type: 'boolean' },
+      relayer: { type: 'string' }, 'no-relayer': { type: 'boolean' }, 'no-proofs': { type: 'boolean' },
       budget: { type: 'string' }, port: { type: 'string' }, host: { type: 'string' }, 'cache-seconds': { type: 'string' }, file: { type: 'string' }, index: { type: 'string' }, url: { type: 'string' }, 'per-hour': { type: 'string' }, 'free-attests': { type: 'string' }, 'max-gas': { type: 'string' },
     },
   })
-  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'], noRelayer: values['no-relayer'], dropRecords: values['drop-records'], perHour: values['per-hour'], freeAttests: values['free-attests'], maxGas: values['max-gas'], cacheSeconds: values['cache-seconds'], signOut: values['sign-out'], signatureFile: values['signature-file'], keyFile: values['key-file'], statementFile: values['statement-file'] }
+  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'], noRelayer: values['no-relayer'], noProofs: values['no-proofs'], dropRecords: values['drop-records'], perHour: values['per-hour'], freeAttests: values['free-attests'], maxGas: values['max-gas'], cacheSeconds: values['cache-seconds'], signOut: values['sign-out'], signatureFile: values['signature-file'], keyFile: values['key-file'], statementFile: values['statement-file'] }
   setJson(!!opts.json)
   if (opts.version) { process.stdout.write(version + '\n'); return }
   const [cmd, ...rest] = positionals

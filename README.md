@@ -32,7 +32,6 @@ proofs
   ✓ DNS        thurin.id
   ✓ DNS        thurinlabs.id
   ✓ Codeberg   thurinlabs
-efp         2 followers · 0 following
 ```
 
 It takes an ENS name, an address, a fingerprint, or a 16-character key ID. Exit code 1 means no verified claim. When a claim doesn't count, the line says why: `✗ key expired`, `✗ key revoked`, `✗ key compromised`, `✗ doesn't verify`, and so on.

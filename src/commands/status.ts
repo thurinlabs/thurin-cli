@@ -1,4 +1,4 @@
-import { identifyProof, verifyProof, displayUrl, fetchEFPGraph, claimCheckText, expiresSoon, claimFates, type ProofResult, type ClaimFate, type PGPVerification } from '@thurinlabs/identity-kit/core'
+import { identifyProof, verifyProof, displayUrl, claimCheckText, expiresSoon, claimFates, type ProofResult, type ClaimFate, type PGPVerification } from '@thurinlabs/identity-kit/core'
 import { listKeystores } from '../lib/keystore.js'
 import { chainCtx, claimsOf, detectLookup, resolveOwners, ensNameOf, type Claim } from '../lib/chain.js'
 import { out, ok, bad, dim, bold, label, CliError, EXIT } from '../lib/output.js'
@@ -20,16 +20,21 @@ export async function status(args: string[], opts: Record<string, any>) {
     const current = (lookup.type === 'fingerprint' ? active.find(c => c.fingerprint === lookup.value)
       : lookup.type === 'keyId' ? active.find(c => c.fingerprint.endsWith(lookup.value))
       : null) ?? active[active.length - 1] ?? null
-    let proofs: { provider: string; label: string; display: string; url: string; verified: boolean; reason?: string }[] = []
+    // --no-proofs: ask nothing but the Ethereum node (each proof platform would see the lookup).
+    const offline = !!opts.noProofs
+    let proofs: { provider: string; label: string; display: string; url: string; verified: boolean | null; reason?: string }[] = []
     if (current?.keyInfo) {
       const ps = current.keyInfo.notations.map(identifyProof).filter((p): p is NonNullable<typeof p> => !!p)
-      proofs = await Promise.all(ps.map(async p => { const r = await verifyProof(p, current.fingerprint, process.env.NEYNAR_API_KEY); return { provider: p.provider, label: p.label, display: displayUrl(p), url: p.url, verified: r.verified, reason: r.reason } }))
+      proofs = await Promise.all(ps.map(async p => {
+        if (offline) return { provider: p.provider, label: p.label, display: displayUrl(p), url: p.url, verified: null }
+        const r = await verifyProof(p, current.fingerprint, process.env.NEYNAR_API_KEY)
+        return { provider: p.provider, label: p.label, display: displayUrl(p), url: p.url, verified: r.verified, reason: r.reason }
+      }))
     }
-    const efp = ctx.network === 'mainnet' ? await fetchEFPGraph(owner).catch(() => null) : null
     // The name's id.thurin record: a pointer ENS viewers can show; the claim above is the proof.
     const ensRecord = name && ctx.network === 'mainnet' ? await ensHintOf(ctx, name, claims).catch(() => null) : null
     const fates = claimFates(claims)
-    identities.push({ address: owner, ensName: name, network: ctx.network, claims, current, proofs, efp, ensRecord, fates, mine: ownKeystore(owner) })
+    identities.push({ address: owner, ensName: name, network: ctx.network, claims, current, proofs, ensRecord, fates, mine: ownKeystore(owner) })
   }
 
   out({ query, lookup, identities: identities.map(({ fates, mine, ...i }) => ({
@@ -91,9 +96,8 @@ function render(i: any): string {
     const c = i.claims.find((c: Claim) => !c.revokedAt)
     L.push(c ? `${label('fingerprint')}${c.fingerprint}  ${checkLine(c.verification, i.mine)}` : `${label('current')}${bad('✗ no active claim')}`)
   }
-  if (i.proofs.length) { L.push(label('proofs')); for (const p of i.proofs) L.push(`  ${p.verified ? ok('✓') : bad('✗')} ${p.label.padEnd(10)} ${p.display}${p.verified ? '' : dim('  ' + (p.reason || ''))}`) }
+  if (i.proofs.length) { L.push(label('proofs')); for (const p of i.proofs) L.push(p.verified === null ? `  ${dim('○')} ${p.label.padEnd(10)} ${p.display}${dim('  not checked')}` : `  ${p.verified ? ok('✓') : bad('✗')} ${p.label.padEnd(10)} ${p.display}${p.verified ? '' : dim('  ' + (p.reason || ''))}`) }
   else if (i.current) L.push(`${label('proofs')}${dim('none')}`)
-  if (i.efp?.hasEfp) L.push(`${label('efp')}${i.efp.followers} followers · ${i.efp.following} following`)
   if (i.ensRecord && (i.current || i.ensRecord.state !== 'unset')) L.push(`${label('ens record')}${renderHint(i.ensRecord, i.ensRecord.state === 'unset' && i.current ? i.ensName : undefined)}`)
   if (i.claims.length > 1 || (i.claims[0] && i.claims[0] !== i.current)) {
     L.push(label('history'))
