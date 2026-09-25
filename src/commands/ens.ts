@@ -20,10 +20,11 @@ export async function ens(args: string[], opts: Record<string, any>) {
 
 async function resolveName(ctx: ChainCtx, name: string): Promise<{ name: string; address: Address }> {
   if (ctx.network !== 'mainnet') throw new CliError(`ENS names live on mainnet; --network ${ctx.network} cannot read them`, EXIT.USAGE)
-  if (!name || isAddress(name) || !name.includes('.')) throw new CliError(`Give an ENS name, not "${name || ''}"`, EXIT.USAGE)
+  if (!name) throw new CliError('Usage: thurin ens check|link <name>', EXIT.USAGE)
+  if (isAddress(name) || !name.includes('.')) throw new CliError(`Give an ENS name, not "${name}"`, EXIT.USAGE)
   let normalized: string
   try { normalized = normalize(name) } catch { throw new CliError(`Not a valid ENS name: ${name}`, EXIT.USAGE) }
-  const address = await ctx.client.getEnsAddress({ name: normalized }).catch((e: any) => { throw new CliError(`ENS lookup failed via ${rpcHost(ctx.rpcUrl)}: ${e.shortMessage || e.message}`, EXIT.CHAIN) })
+  const address = await ctx.client.getEnsAddress({ name: normalized }).catch((e: any) => { throw new CliError(`ENS lookup failed via ${rpcHost(ctx.rpcUrl)}: ${e.shortMessage || e.message} (try --rpc <url>)`, EXIT.CHAIN) })
   if (!address) throw new CliError(`${normalized} does not resolve to an address`, EXIT.FAILED)
   return { name: normalized, address: getAddress(address) }
 }
@@ -34,7 +35,7 @@ function pickClaim(claims: Claim[], wanted?: string): Claim | null {
   if (wanted) {
     const w = wanted.replace(/^0x/i, '').replace(/\s+/g, '').toUpperCase()
     const c = active.find(c => c.fingerprint === w)
-    if (!c) throw new CliError(`${wanted} is not an active verified claim of this address`, EXIT.USAGE)
+    if (!c) throw new CliError(`This address has no active, verified claim for ${wanted}`, EXIT.USAGE)
     return c
   }
   return active[active.length - 1] ?? null
@@ -67,7 +68,7 @@ async function ensLink(args: string[], opts: Record<string, any>) {
   const { name, address } = await resolveName(ctx, args[0])
   const claims = await claimsOf(ctx, address)
   const claim = pickClaim(claims, opts.key)
-  if (!claim) throw new CliError(`${name} → ${address} has no verified active claim to point at. Attest first: thurin attest`, EXIT.FAILED)
+  if (!claim) throw new CliError(`${name} → ${address} has no active, verified claim to point at. Publish a claim first: thurin attest`, EXIT.FAILED)
   const before = await ensHintOf(ctx, name, claims)
   const call = ensHintWrite(name, claim.fingerprint)
   if (before.state === 'match' && !opts.key) {

@@ -13,19 +13,19 @@ import { REGISTRY_ADDRESS } from '@thurinlabs/identity-kit/core'
 
 const { version } = createRequire(import.meta.url)('../package.json') as { version: string }
 
-const HELP = `${bold('thurin')} ${version} — your PGP key on your Ethereum address, from a terminal.
+const HELP = `${bold('thurin')} ${version} · your PGP key on your Ethereum address, from a terminal.
 
   thurin status <ens|0x|fingerprint|keyid>   look up anyone's claims and proofs
   thurin attest                              add your PGP key to your address
   thurin reattest | update-key | revoke      change or end your claim
-  thurin record get | set | clear            records on your claim
+  thurin record ...                          records on your claim
   thurin key ...                             your PGP key (gpg does the work)
   thurin wallet ...                          your address (keystores)
   thurin ens check | link <name>             the name's id.thurin record
   thurin keyserver | relay                   serve keys to gpg, or pay for others' claims
 
 More: thurin help <command>   (e.g. thurin help attest)
-Options: --network mainnet|sepolia|local   --json   --yes      Docs: https://docs.thurin.id
+Options: --network mainnet|sepolia|local   --json   --yes   Docs: https://docs.thurin.id
 `
 
 /** The details for each command, shown by `thurin help <command>` or `thurin <command> --help`. */
@@ -50,7 +50,7 @@ const TOPICS: Record<string, string> = {
   thurin key default <fpr>
       The key to use when --key isn't given.
 
-  Thurin doesn't make or change keys; gpg does:
+  thurin doesn't make or change keys; gpg does:
       gpg --quick-gen-key "Your Name" ed25519 sign 2y
       gpg --quick-add-key <fingerprint> cv25519 encr 2y
       gpg --quick-add-uid <fingerprint> "Your Name"    a name without an email
@@ -60,7 +60,7 @@ const TOPICS: Record<string, string> = {
   thurin wallet create <name>
       A fresh address. The 12 words are shown once.
 
-  thurin wallet import <name> [--from x.json]
+  thurin wallet import <name> [--from keystore.json]
       From a private key, 12 words, or an existing keystore.
 
   thurin wallet list
@@ -84,12 +84,13 @@ const TOPICS: Record<string, string> = {
 
   thurin revoke [<index>] [--reason compromised|retired|other]
       End a claim. "compromised" is final: this address can never claim
-      that key again. On a claim already revoked or replaced,
-      --reason compromised marks it later, once.
+      that key again. Already revoked or replaced? --reason compromised
+      still marks it, once.
 
 More: thurin help no-eth   (your ETH is elsewhere, or you have none)
 `,
   'no-eth': `${bold('Your ETH is elsewhere, or you have none')}
+  (add these to attest, reattest, update-key, revoke, or record set)
 
   --no-key --owner <address|ens>
       Sign here and publish from a wallet elsewhere, through a link.
@@ -102,12 +103,12 @@ More: thurin help no-eth   (your ETH is elsewhere, or you have none)
 
   --authorize [--deadline 7d] [--out f.json]
       No ETH here: sign a free permission that anyone can publish and pay for.
-      --relayer <url>     post it to a relayer that pays
+      --relayer <url>     post it to a relay that pays
       --no-relayer        make a link instead
       --signer <cmd>      sign with a program, e.g. a card (needs --owner)
-      --sign-out f.json   air gap: write what needs signing, and stop
+      --sign-out f.json   air gap: write what needs signing, and stop (needs --owner)
 
-  thurin authorize finish f.json --signature 0x…
+  thurin authorize finish f.json --signature 0x… | --signature-file f
       Check an air-gapped signature and hand the permission out.
 
   thurin submit <link|file>
@@ -121,7 +122,7 @@ More: thurin help no-eth   (your ETH is elsewhere, or you have none)
   thurin record get <identity> [<name>]
       Anyone can read. Without a name, every record on the claim. With one,
       just its value, so it pipes: … get <identity> canary | gpg --verify
-      (releases shows as a list at a terminal)
+      (thurin.releases shows as a list at a terminal)
 
   thurin record set <name> <value | --file f>
       A name without a dot gets thurin. in front.
@@ -129,7 +130,7 @@ More: thurin help no-eth   (your ETH is elsewhere, or you have none)
   thurin record clear <name>
 
   thurin record add-release <name> <SHA256SUMS> [--url u]
-      Name a release on-chain by its checksum file.
+      Name a release on-chain by its checksum file, in thurin.releases.
 
   --index <n>
       Which claim, when the address has more than one active.
@@ -148,12 +149,12 @@ More: thurin help no-eth   (your ETH is elsewhere, or you have none)
   thurin keyserver [--port 11371] [--host 127.0.0.1] [--cache-seconds 60]
       Then: gpg --keyserver hkp://127.0.0.1:11371 --recv-keys <fingerprint>
 `,
-  relay: `${bold('Relayer')}  (the one command that spends: gas only, within a budget)
+  relay: `${bold('Relay')}  (the one command that spends: gas only, within a budget)
 
-  thurin relay --account <hot key> [options]
+  thurin relay --account <keystore> [options]
       Publishes other people's permissions and pays the fee.
       --budget 0.01       ETH per day
-      --free-attests 1    per address
+      --free-attests 1    claims paid per address
       --per-hour 10       requests per caller
       --max-gas 6000000   per transaction
       --port 8787
@@ -191,7 +192,7 @@ async function main() {
     options: {
       json: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
       network: { type: 'string', short: 'n' }, rpc: { type: 'string' }, account: { type: 'string', short: 'a' }, 'password-file': { type: 'string' },
-      key: { type: 'string', short: 'k' }, calldata: { type: 'boolean' }, 'include-email': { type: 'boolean' }, replace: { type: 'boolean' }, import: { type: 'boolean' },
+      key: { type: 'string', short: 'k' }, calldata: { type: 'boolean' }, 'include-email': { type: 'boolean' }, import: { type: 'boolean' },
       from: { type: 'string' }, 'private-key': { type: 'boolean' },
       'no-key': { type: 'boolean' }, owner: { type: 'string' }, site: { type: 'string' },
       statement: { type: 'boolean' }, 'key-file': { type: 'string' }, 'statement-file': { type: 'string' },

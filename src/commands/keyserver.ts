@@ -27,7 +27,7 @@ export async function keyserver(_args: string[], opts: Record<string, any>) {
   process.stderr.write(`${ok('thurin keyserver')} on ${ctx.network} · ${bold(`hkp://${host}:${port}`)}\n` +
     `${label('gpg')}gpg --keyserver hkp://${host}:${port} --recv-keys <fingerprint>\n` +
     `${label('dirmngr')}echo "keyserver hkp://${host}:${port}" >> ~/.gnupg/dirmngr.conf && gpgconf --kill dirmngr\n` +
-    `${dim('No /pks/add: keys are published by attesting. Cache ' + ttl / 1000 + 's.')}\n`)
+    `${dim('No /pks/add: owners publish keys as claims. Cache ' + ttl / 1000 + 's.')}\n`)
 
   async function lookup(search: string): Promise<Entry[]> {
     const hit = cache.get(search)
@@ -38,22 +38,22 @@ export async function keyserver(_args: string[], opts: Record<string, any>) {
     return value
   }
 
-  const server = createServer((req, res) => handle(req, res).catch(e => { log('lookup', e instanceof CliError && e.code === EXIT.CHAIN ? 'error: chain read failed' : `error: ${e.name}`); text(res, 500, 'error: reading the chain failed; try again') }))
+  const server = createServer((req, res) => handle(req, res).catch(e => { log('lookup', e instanceof CliError && e.code === EXIT.CHAIN ? 'error: chain read failed' : `error: ${e.name}`); text(res, 500, 'Reading the chain failed; try again') }))
   async function handle(req: IncomingMessage, res: ServerResponse) {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
     res.setHeader('access-control-allow-origin', '*')
     if (req.method === 'POST' && url.pathname === '/pks/add') {
       log('add', 'refused')
-      return text(res, 405, 'This keyserver has no upload. Keys are published by their owner attesting at https://thurin.id/attest or with `thurin attest`.')
+      return text(res, 405, 'This keyserver has no upload. Owners publish keys as claims: https://thurin.id/attest or thurin attest.')
     }
     const browser = /text\/html/.test(req.headers.accept || '')
     if (url.pathname === '/' && browser) return html(res, 200, frontDoor(req, ctx))
-    if (url.pathname === '/' || url.pathname === '/health') return text(res, 200, `thurin keyserver ${VERSION} · ${ctx.network} · HKP over the Thurin registry. GET /pks/lookup?op=get&search=0x<fingerprint>`)
-    if (url.pathname !== '/pks/lookup' || req.method !== 'GET') return text(res, 404, 'not found')
+    if (url.pathname === '/' || url.pathname === '/health') return text(res, 200, `thurin keyserver ${VERSION} · ${ctx.network} · HKP over the Thurin.id registry. GET /pks/lookup?op=get&search=0x<fingerprint>`)
+    if (url.pathname !== '/pks/lookup' || req.method !== 'GET') return text(res, 404, 'Not found')
     const op = url.searchParams.get('op') || 'get'
     const search = (url.searchParams.get('search') || '').trim()
-    if (!search) return text(res, 400, 'search parameter required')
-    if (op !== 'get' && op !== 'index' && op !== 'vindex') return text(res, 501, `op=${op} not supported`)
+    if (!search) return text(res, 400, 'The search parameter is required')
+    if (op !== 'get' && op !== 'index' && op !== 'vindex') return text(res, 501, `op=${op} is not supported`)
 
     // gpg sends options=mr and Accept: */*; a person arrives from the form with Accept: text/html.
     const human = browser && op !== 'get' && !/\bmr\b/.test(url.searchParams.get('options') || '')
@@ -114,7 +114,7 @@ export function hkpSearchTerm(search: string): string {
   // only the key-ID form loses its prefix here. Fingerprint lookups from gpg still work because
   // an address that has no claim falls through to nothing, and gpg always sends the full 0x40.
   const q = search.trim().replace(/^0x(?=[0-9a-fA-F]{16}$)/, '')
-  if (!/^([0-9a-fA-F]{16}|[0-9a-fA-F]{40}|0x[0-9a-fA-F]{40}|[a-z0-9-]+(\.[a-z0-9-]+)+)$/i.test(q)) throw new CliError('Search by fingerprint, key ID, address, or ENS name', EXIT.USAGE)
+  if (!/^([0-9a-fA-F]{16}|[0-9a-fA-F]{40}|0x[0-9a-fA-F]{40}|[a-z0-9-]+(\.[a-z0-9-]+)+)$/i.test(q)) throw new CliError("Emails aren't on-chain. Search by fingerprint, key ID, address, or ENS name", EXIT.USAGE)
   return q
 }
 
@@ -227,7 +227,7 @@ footer .col a { color: #a8a598; text-decoration: none; }
 footer .col a:hover { color: #7c9a3e; }
 </style>
 <h1>${esc(dotId ? host.replace(/\.id(:\d+)?$/, '') : host)}${dotId ? '<span>.id</span>' : ''}</h1>
-<p>A PGP keyserver whose database is Ethereum. A key is here because its owner published a claim from their own address on the <a href="https://docs.thurin.id/#/contracts" target="_blank" rel="noopener noreferrer">Thurin registry</a>. There is no upload, and nothing to poison: revoke the claim and the key is gone.</p>
+<p>A PGP keyserver whose database is Ethereum. A key is here because its owner published a claim from their own address on the <a href="https://docs.thurin.id/#/contracts" target="_blank" rel="noopener noreferrer">Thurin.id registry</a>. There is no upload, and nothing to poison: revoke the claim and the key is gone.</p>
 <form action="/pks/lookup" method="get">
   <input type="hidden" name="op" value="index">
   <input name="search" value="${esc(search)}" placeholder="fingerprint, key ID, address, or ENS name" aria-label="Search" autofocus>
@@ -241,7 +241,7 @@ gpg --recv-keys &lt;fingerprint&gt;</pre>
 <footer>
   <span class="version">thurin keyserver ${VERSION} · ${ctx.network}</span>
   <div class="cols">
-    <div class="col"><b>Thurin</b>
+    <div class="col"><b>Links</b>
       <a href="https://thurin.id" target="_blank" rel="noopener noreferrer">Thurin.id</a>
       <a href="https://thurin.id/attest" target="_blank" rel="noopener noreferrer">Attest</a>
       <a href="https://thurinlabs.id" target="_blank" rel="noopener noreferrer">Thurin Labs</a>

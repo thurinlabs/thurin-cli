@@ -37,12 +37,12 @@ describe('hand-off link', () => {
     expect(decodeHandoff(encodeHandoff({ ...h, key })).key).toBe(key)
   })
   it('refuses anything that is not a hand-off', () => {
-    expect(() => decodeHandoff(Buffer.from('{"v":2}').toString('base64url'))).toThrow(/Not a Thurin hand-off/)
-    expect(() => decodeHandoff(encodeHandoff({ ...h, v: 1 } as any))).toThrow(/format 1/)
+    expect(() => decodeHandoff(Buffer.from('{"v":2}').toString('base64url'))).toThrow(/Not a Thurin.id link/)
+    expect(() => decodeHandoff(encodeHandoff({ ...h, v: 1 } as any))).toThrow(/older registry/)
     expect(() => decodeHandoff(encodeHandoff({ ...h, key: '-----BEGIN PGP PUBLIC KEY BLOCK-----' }))).toThrow(/no key/)
     expect(() => decodeHandoff(encodeHandoff({ ...h, op: 'revoke', index: 0, reason: 'lost' as any }))).toThrow(/revoke reason/)
-    expect(() => decodeHandoff(encodeHandoff({ ...h, authorization: { nonce: 0, deadline: 1, signature: '0x12' } }))).toThrow(/malformed authorization/)
-    expect(() => readHandoffInput('what')).toThrow(/hand-off/)
+    expect(() => decodeHandoff(encodeHandoff({ ...h, authorization: { nonce: 0, deadline: 1, signature: '0x12' } }))).toThrow(/permission is malformed/)
+    expect(() => readHandoffInput('what')).toThrow(/link/)
   })
 })
 

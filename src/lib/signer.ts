@@ -34,7 +34,7 @@ export function commandSigner(command: string): Signer {
       child.stdout.on('data', c => { out += c })
       child.on('error', reject)
       child.on('close', code => {
-        if (code !== 0) return reject(new CliError(`Signer exited with code ${code}`, EXIT.FAILED))
+        if (code !== 0) return reject(new CliError(`The --signer command exited with code ${code} (its errors are above)`, EXIT.FAILED))
         try { resolve(parseSignature(out)) } catch (e) { reject(e) }
       })
       // A signer that exits without reading its input (a wrong command, a card that refused) closes

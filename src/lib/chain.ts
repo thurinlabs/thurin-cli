@@ -79,7 +79,7 @@ export async function readRegistry<T>(ctx: ChainCtx, functionName: string, args:
   try {
     return await ctx.client.readContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName, args } as any) as T
   } catch (err: any) {
-    throw new CliError(`Registry read failed (${functionName}) on ${ctx.network} via ${rpcHost(ctx.rpcUrl)}: ${err.shortMessage || err.message}`, EXIT.CHAIN)
+    throw new CliError(`Couldn't read the registry on ${ctx.network} via ${rpcHost(ctx.rpcUrl)} (${err.shortMessage || err.message}). Try again, or --rpc <url>`, EXIT.CHAIN)
   }
 }
 

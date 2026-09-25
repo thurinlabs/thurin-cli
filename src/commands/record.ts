@@ -12,7 +12,7 @@ export async function record(args: string[], opts: Record<string, any>) {
     case 'set': return recordSet(args.slice(1), opts)
     case 'clear': return recordSet([args[1], ''], opts)
     case 'add-release': return addReleaseCommand(args.slice(1), opts)
-    default: throw new CliError('Usage: thurin record <get <identity> [kind] | set <kind> <value|--file f> | clear <kind> | add-release <name> <SHA256SUMS> [--url u]> [--index n]', EXIT.USAGE)
+    default: throw new CliError('Usage: thurin record get|set|clear|add-release …  (thurin help record)', EXIT.USAGE)
   }
 }
 
@@ -24,7 +24,7 @@ async function recordsOnClaim(ctx: ChainCtx, owner: Address, index: number): Pro
 
 /** thurin record get <identity> [kind]: anyone can read; one kind, or every record on each active claim. */
 async function recordGet(args: string[], opts: Record<string, any>) {
-  if (!args[0]) throw new CliError('Usage: thurin record get <ens|0x|fingerprint> [kind]  (kinds: ' + KNOWN_KINDS.join(', ') + ')', EXIT.USAGE)
+  if (!args[0]) throw new CliError('Usage: thurin record get <ens|0x|fingerprint|keyid> [name]  (Thurin.id names: ' + KNOWN_KINDS.join(', ') + ')', EXIT.USAGE)
   const ctx = chainCtx(opts)
   let kind: string | null = null
   if (args[1]) { try { kind = checkKindName(args[1]) } catch (e: any) { throw new CliError(e.message, EXIT.USAGE) } }
@@ -69,7 +69,7 @@ async function recordGet(args: string[], opts: Record<string, any>) {
 
 /** thurin record set <kind> <value|--file f> [--index n]: the owner writes; '' clears. */
 async function recordSet(args: string[], opts: Record<string, any>) {
-  if (!args[0]) throw new CliError('Usage: thurin record set <kind> <value|--file f> [--index n]', EXIT.USAGE)
+  if (!args[0]) throw new CliError('Usage: thurin record set <name> <value | --file f> [--index n]', EXIT.USAGE)
   let kind: string, value: string
   try {
     kind = checkKindName(args[0])
@@ -78,7 +78,7 @@ async function recordSet(args: string[], opts: Record<string, any>) {
   const ctx = chainCtx(opts)
   const owner = await ownerFor(ctx, opts)
   const claims = await claimsOf(ctx, owner)
-  const idx = opts.index !== undefined ? Number(opts.index) : pickIndex(undefined, claims)
+  const idx = pickIndex(opts.index, claims)
   if (!claims[idx]) throw new CliError(`No claim #${idx}`, EXIT.USAGE)
   if (!isJson()) process.stderr.write(`${label('claim')}#${idx} ${claims[idx].fingerprint}\n${label('name')}${kind}\n${label('value')}${value ? `${new TextEncoder().encode(value).length} bytes` : dim('(clear)')}\n`)
   const o = { ...opts, _record: { kind, value } }
@@ -100,11 +100,11 @@ async function addReleaseCommand(args: string[], opts: Record<string, any>) {
   const ctx = chainCtx(opts)
   const owner = await ownerFor(ctx, opts)
   const claims = await claimsOf(ctx, owner)
-  const idx = opts.index !== undefined ? Number(opts.index) : pickIndex(undefined, claims)
+  const idx = pickIndex(opts.index, claims)
   if (!claims[idx]) throw new CliError(`No claim #${idx}`, EXIT.USAGE)
   const existingText = await readRegistry<string>(ctx, 'recordText', [owner, BigInt(idx), 'thurin.releases'])
   let existing = null
-  if (existingText) { try { existing = parseReleases(existingText) } catch { throw new CliError('The existing thurin.releases record is not v1; edit it with record set', EXIT.FAILED) } }
+  if (existingText) { try { existing = parseReleases(existingText) } catch { throw new CliError("The thurin.releases record on this claim can't be read. Replace it: thurin record set thurin.releases --file f", EXIT.FAILED) } }
   const { record: rec, dropped } = addRelease(existing, { name, sha256, date: new Date().toISOString().slice(0, 10), ...(opts.url ? { url: opts.url } : {}) })
   const text = JSON.stringify(rec)
   if (!isJson()) {

@@ -56,10 +56,10 @@ const day = (iso: string | null | undefined) => (iso ? iso.slice(0, 10) : '?')
 /** The terminal version of each fix (thurin.id says "Update key"; here it's the command). */
 const CLI_FIX: Partial<Record<NonNullable<PGPVerification['kind']>, string>> = {
   expired: 'extend it (gpg --quick-set-expire), then thurin update-key',
-  'signing-key-expired': 'extend that subkey, then thurin update-key',
-  revoked: 'thurin reattest --key <your new key>',
-  compromised: 'thurin reattest --key <a new key>',
-  'signing-key-revoked': 'thurin reattest with a current key',
+  'signing-key-expired': 'extend that subkey (gpg --quick-set-expire <fpr> 2y <subkey>), then thurin update-key',
+  revoked: 'thurin reattest --key <new key>',
+  compromised: 'thurin reattest --key <new key>',
+  'signing-key-revoked': 'thurin reattest --key <new key>',
 }
 
 /** "✗ key expired 2029-03-05: extend it, …" (the fix only when a keystore here owns the claim). */

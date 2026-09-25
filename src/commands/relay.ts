@@ -37,7 +37,7 @@ export async function relay(_args: string[], opts: Record<string, any>) {
 
   const balance = await ctx.client.getBalance({ address: account.address })
   process.stderr.write(`${ok('thurin relay')} on ${ctx.network} · paying from ${bold(account.address)} (${formatEther(balance)} ETH)\n` +
-    `${label('budget')}${limits.cfg.budgetEth} ETH/day · ${limits.cfg.attestsPerOwner} free attest per address · ${limits.cfg.perCallerPerHour} requests/hour per caller · ≤ ${limits.cfg.maxGas} gas/tx\n` +
+    `${label('budget')}${limits.cfg.budgetEth} ETH/day · ${limits.cfg.attestsPerOwner} free claim per address · ${limits.cfg.perCallerPerHour} requests/hour per caller · ≤ ${limits.cfg.maxGas} gas/tx\n` +
     `${label('listen')}http://${host}:${port}  ${dim('(put nginx or another TLS proxy in front)')}\n`)
   if (balance === 0n) warn('The paying account holds no ETH; every request will fail until it is funded.')
 
@@ -53,13 +53,13 @@ export async function relay(_args: string[], opts: Record<string, any>) {
     if (req.method === 'GET') {
       return reply(res, 200, { ok: true, network: ctx.network, payer: account.address, budgetEth: limits.cfg.budgetEth, spentTodayEth: limits.spentLast24h(), freeAttestsPerOwner: limits.cfg.attestsPerOwner })
     }
-    if (req.method !== 'POST') return reply(res, 405, { error: 'POST a hand-off with an authorization' })
+    if (req.method !== 'POST') return reply(res, 405, { error: 'POST a signed permission' })
     const caller = callerKey(req)
     const raw = await readBody(req)
     let h: Handoff
-    try { h = decodeHandoff(encodeHandoff(JSON.parse(raw))) } catch (e: any) { return reply(res, 400, { error: `Not a hand-off: ${e.message}` }) }
-    if (h.network !== ctx.network) return reply(res, 400, { error: `This relayer publishes to ${ctx.network}; the authorization is for ${h.network}` })
-    if (!h.authorization) return reply(res, 400, { error: 'No authorization: only the owner can publish this' })
+    try { h = decodeHandoff(encodeHandoff(JSON.parse(raw))) } catch (e: any) { return reply(res, 400, { error: e.message }) }
+    if (h.network !== ctx.network) return reply(res, 400, { error: `This relay publishes to ${ctx.network}; the permission is for ${h.network}` })
+    if (!h.authorization) return reply(res, 400, { error: 'No permission in it: only the owner can publish this' })
 
     const t0 = Date.now()
     try {
@@ -67,14 +67,14 @@ export async function relay(_args: string[], opts: Record<string, any>) {
         const { owner, proofs } = await checkAuthorization(ctx, h)
         const fn = FOR_FN[h.op], args = forArgsOf(h)
         const gas = await ctx.client.estimateContractGas({ address: ctx.registry, abi: REGISTRY_ABI, functionName: fn, args, account } as any)
-          .catch((e: any) => { throw new CliError(`The registry would reject this: ${e.shortMessage || e.message}`, EXIT.CHAIN) })
+          .catch((e: any) => { throw new CliError(`The registry would refuse this: ${e.shortMessage || e.message}`, EXIT.CHAIN) })
         const price = await ctx.client.getGasPrice()
         const estEth = Number(gas * price * 12n / 10n) / 1e18   // 20 % headroom for a price move
         limits.check(caller, owner, h.op, gas, estEth)
         limits.record(caller, owner, h.op, estEth)
         const hash = await wallet.writeContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: fn, args, account, chain: ctx.client.chain } as any)
         const receipt = await ctx.client.waitForTransactionReceipt({ hash })
-        if (receipt.status !== 'success') throw new CliError(`Transaction reverted: ${hash}`, EXIT.CHAIN)
+        if (receipt.status !== 'success') throw new CliError(`The transaction failed, so nothing changed: ${hash}`, EXIT.CHAIN)
         return { hash, block: receipt.blockNumber.toString(), owner, op: h.op, proofs, payer: account.address as Address, identity: ctx.site ? `${ctx.site}/eth/${owner}` : null }
       })
       log(h, `ok ${result.hash} ${Date.now() - t0}ms`)

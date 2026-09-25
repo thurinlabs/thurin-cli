@@ -8,7 +8,7 @@ export async function key(args: string[], opts: Record<string, any>) {
   const sub = args[0]
   switch (sub) {
     case 'list': return keyList()
-    case 'create': throw new CliError(`Thurin doesn't make keys; gpg does. ${MAKE_KEY_HINT}`, EXIT.USAGE)
+    case 'create': throw new CliError(`thurin doesn't make keys; gpg does. ${MAKE_KEY_HINT}`, EXIT.USAGE)
     case 'add-name': throw new CliError(`Add a name with gpg: ${addNameHint(args[1] || '<fingerprint>')}`, EXIT.USAGE)
     case 'export': return keyExport(args.slice(1))
     case 'fetch': return keyFetch(args.slice(1), opts)
@@ -30,7 +30,7 @@ async function keyList() {
   out(rows, () => rows.length ? rows.map(k =>
     `${k.isDefault ? ok('*') : ' '} ${bold(k.fingerprint)}  ${k.algorithm} · ${k.created}${k.expires ? ` → ${k.expires}` : ''}\n` +
     k.userIDs.map(u => `    ${u.includes('@') ? dim(u) : u}`).join('\n') + '\n' +
-    `    ${k.publishedName ? ok('published name: ' + k.publishedName) : bad(`no name without an email (${addNameHint(k.fingerprint)})`)} · ${k.hasEncryptionSubkey ? 'encrypt ✓' : dim('no encryption subkey')} · proofs: ${k.proofs}`
+    `    ${k.publishedName ? ok('published name: ' + k.publishedName) : bad(`no name without an email (${addNameHint(k.fingerprint)})`)} · ${k.hasEncryptionSubkey ? 'encryption subkey ✓' : dim('no encryption subkey')} · proofs: ${k.proofs}`
   ).join('\n') : dim(`No secret keys in your gpg keyring. ${MAKE_KEY_HINT}`))
 }
 
@@ -52,7 +52,7 @@ async function keyFetch(args: string[], opts: Record<string, any>) {
     else process.stdout.write(current.pgpPublicKey)
     return
   }
-  throw new CliError('No verified active claim found for that identity', EXIT.FAILED)
+  throw new CliError('No active, verified claim for that identity. See: thurin status <identity>', EXIT.FAILED)
 }
 
 async function keyDefault(args: string[]) {

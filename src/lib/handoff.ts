@@ -77,21 +77,21 @@ const payloadValue = (b: Buffer) => (b[0] === 0x2d ? b.toString('utf8') : `0x${b
 export function decodeHandoff(encoded: string): Handoff {
   let h: any
   const [json, keyPart, sigPart] = encoded.split('.')
-  try { h = JSON.parse(Buffer.from(json, 'base64url').toString('utf8')) } catch { throw new Error('Not a Thurin hand-off') }
+  try { h = JSON.parse(Buffer.from(json, 'base64url').toString('utf8')) } catch { throw new Error('Not a Thurin.id link or permission file') }
   if (h && keyPart) h.key = payloadValue(Buffer.from(keyPart, 'base64url'))
   if (h && sigPart) h.signature = payloadValue(Buffer.from(sigPart, 'base64url'))
-  if (h?.v === 1) throw new Error('This is a format 1 hand-off (registry v2); make a new one')
-  if (h?.v !== 2 || !OPS.includes(h.op)) throw new Error('Not a Thurin hand-off')
-  if (!/^0x[0-9a-f]{40}$/.test(h.owner || '')) throw new Error('Hand-off has no valid owner')
-  if (h.op !== 'attest' && !Number.isInteger(h.index)) throw new Error('Hand-off names no claim index')
-  if ((h.op === 'attest' || h.op === 'reattest' || h.op === 'update-key') && !isHex(h.key)) throw new Error('Hand-off carries no key')
+  if (h?.v === 1) throw new Error('This link is from an older registry; make a new one')
+  if (h?.v !== 2 || !OPS.includes(h.op)) throw new Error('Not a Thurin.id link or permission file')
+  if (!/^0x[0-9a-f]{40}$/.test(h.owner || '')) throw new Error('The link has no valid owner')
+  if (h.op !== 'attest' && !Number.isInteger(h.index)) throw new Error('The link names no claim')
+  if ((h.op === 'attest' || h.op === 'reattest' || h.op === 'update-key') && !isHex(h.key)) throw new Error('The link carries no key')
   if (h.reason != null && !(OWNER_REVOKE_REASONS as readonly string[]).includes(h.reason)) throw new Error(`Unknown revoke reason "${h.reason}"`)
-  if (h.keepRecords != null && typeof h.keepRecords !== 'boolean') throw new Error('Hand-off has an invalid keepRecords')
-  if (h.op === 'set-record' && (typeof h.kind !== 'string' || typeof h.value !== 'string')) throw new Error('Hand-off names no record')
-  if ((h.op === 'attest' || h.op === 'reattest') && typeof h.signature !== 'string') throw new Error('Hand-off carries no signature')
+  if (h.keepRecords != null && typeof h.keepRecords !== 'boolean') throw new Error('The link has an invalid keepRecords')
+  if (h.op === 'set-record' && (typeof h.kind !== 'string' || typeof h.value !== 'string')) throw new Error('The link names no record')
+  if ((h.op === 'attest' || h.op === 'reattest') && typeof h.signature !== 'string') throw new Error('The link carries no signature')
   if (h.authorization != null) {
     const a = h.authorization
-    if (!Number.isInteger(a.nonce) || !Number.isInteger(a.deadline) || !/^0x[0-9a-f]{130}$/i.test(a.signature || '')) throw new Error('Hand-off has a malformed authorization')
+    if (!Number.isInteger(a.nonce) || !Number.isInteger(a.deadline) || !/^0x[0-9a-f]{130}$/i.test(a.signature || '')) throw new Error("The link's permission is malformed")
   }
   return h as Handoff
 }
@@ -110,7 +110,7 @@ export function readHandoffInput(input: string): Handoff {
     return decodeHandoff(encodeHandoff(h))   // same validation as the link
   }
   if (/^[A-Za-z0-9_.-]+$/.test(input.trim())) return decodeHandoff(input.trim())
-  throw new Error(`"${input}" is not a hand-off link, file, or fragment`)
+  throw new Error(`"${input}" is not a link, permission file, or fragment`)
 }
 
 /** The typed data the owner signed (or will sign), rebuilt from the hand-off's own fields. */
@@ -160,6 +160,7 @@ export function describeDeadline(unix: number): string {
   const left = unix - Math.floor(Date.now() / 1000)
   const when = new Date(unix * 1000).toISOString().replace('T', ' ').slice(0, 16) + ' UTC'
   if (left <= 0) return `expired ${when}`
-  const span = left < 3600 ? `${Math.max(1, Math.floor(left / 60))} min` : left < 86400 ? `${Math.floor(left / 3600)} h` : `${Math.floor(left / 86400)} day${left >= 172800 ? 's' : ''}`
+  const n = left < 3600 ? Math.max(1, Math.floor(left / 60)) : left < 86400 ? Math.floor(left / 3600) : Math.floor(left / 86400)
+  const span = `${n} ${left < 3600 ? 'minute' : left < 86400 ? 'hour' : 'day'}${n === 1 ? '' : 's'}`
   return `${span} (${when})`
 }

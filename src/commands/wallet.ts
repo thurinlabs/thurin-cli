@@ -1,5 +1,5 @@
 import pc from 'picocolors'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { generateMnemonic, mnemonicToAccount } from 'viem/accounts'
 import { english } from 'viem/accounts'
@@ -31,7 +31,7 @@ async function password(opts: Record<string, any>, confirmIt: boolean) {
 
 async function create(args: string[], opts: Record<string, any>) {
   const name = args[0]
-  if (!name) throw new CliError('Usage: thurin wallet create <name>  — a fresh identity address (never needs to hold ETH if someone else submits)', EXIT.USAGE)
+  if (!name) throw new CliError('Usage: thurin wallet create <name>', EXIT.USAGE)
   const mnemonic = generateMnemonic(english)
   const acct = mnemonicToAccount(mnemonic)
   const pk = `0x${bytesToHex(acct.getHdKey().privateKey!)}` as `0x${string}`
@@ -49,7 +49,7 @@ function recoveryBlock(mnemonic: string) {
   const rule = '─'.repeat(64)
   return [
     pc.yellow(rule),
-    pc.yellow(bold('  RECOVERY PHRASE — write these 12 words down, offline, now.')),
+    pc.yellow(bold('  RECOVERY PHRASE. Write these 12 words on paper.')),
     pc.yellow('  Shown once. Not kept anywhere. Anyone with them controls this address.'),
     '',
     ...rows.map(r => '  ' + bold(r)),
@@ -60,13 +60,14 @@ function recoveryBlock(mnemonic: string) {
 
 async function importWallet(args: string[], opts: Record<string, any>) {
   const name = args[0]
-  if (!name) throw new CliError('Usage: thurin wallet import <name> [--from <keystore.json>]  (else you are asked for a private key or mnemonic)', EXIT.USAGE)
+  if (!name) throw new CliError('Usage: thurin wallet import <name> [--from keystore.json]  (without --from you are asked for a private key or the 12 words)', EXIT.USAGE)
   let pk: `0x${string}`
   if (opts.from) {
+    if (!existsSync(opts.from)) throw new CliError(`No file at ${opts.from}`, EXIT.USAGE)
     const ks = JSON.parse(readFileSync(opts.from, 'utf8')) as KeystoreV3
     pk = decryptKeystore(ks, await prompt(`Password for ${opts.from}: `, true))
   } else {
-    pk = parseMnemonicOrKey(await prompt('Private key or mnemonic: ', true)).privateKey
+    pk = parseMnemonicOrKey(await prompt('Private key or 12 words: ', true)).privateKey
   }
   const acct = privateKeyToAccount(pk)
   const pw = await password(opts, true)
@@ -83,7 +84,8 @@ function list() {
 
 async function exportWallet(args: string[], opts: Record<string, any>) {
   const name = args[0] || readConfig().account
-  if (!name) throw new CliError('Usage: thurin wallet export <name>', EXIT.USAGE)
+  if (!name) throw new CliError('Usage: thurin wallet export <name> [--private-key]', EXIT.USAGE)
+  if (!existsSync(keystorePath(name))) throw new CliError(`No keystore "${name}". See: thurin wallet list`, EXIT.USAGE)
   const ks = JSON.parse(readFileSync(keystorePath(name), 'utf8')) as KeystoreV3
   if (opts.privateKey) {
     warn('Printing a private key to the terminal.')
@@ -95,7 +97,8 @@ async function exportWallet(args: string[], opts: Record<string, any>) {
 
 function setDefault(args: string[]) {
   const name = args[0]
-  if (!name || !listKeystores().some(k => k.name === name)) throw new CliError('Usage: thurin wallet default <name>  (thurin wallet list)', EXIT.USAGE)
+  if (!name) throw new CliError('Usage: thurin wallet default <name>', EXIT.USAGE)
+  if (!listKeystores().some(k => k.name === name)) throw new CliError(`No keystore "${name}". See: thurin wallet list`, EXIT.USAGE)
   const cfg = readConfig(); cfg.account = name; writeConfig(cfg)
-  out({ default: name }, () => `${ok('Default account')} ${name}`)
+  out({ default: name }, () => `${ok('Default keystore')} ${name}`)
 }

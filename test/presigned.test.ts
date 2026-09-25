@@ -58,7 +58,7 @@ describe('pre-signed attest: --key-file / --statement-file', () => {
   it('fails when the key file is not the key named', async () => {
     const f = files()
     const pre = presignedInputs({ keyFile: f.keyFile, statementFile: f.statementFile })!
-    await expect(preflight({} as any, OWNER, '6E0053911942A889426C1866E34D9266098F7FE7', true, true, pre)).rejects.toThrow(/fingerprint does not match/)
+    await expect(preflight({} as any, OWNER, '6E0053911942A889426C1866E34D9266098F7FE7', true, true, pre)).rejects.toThrow(/different key than/)
   })
   it('a key file alone is enough for update-key, not for attest', async () => {
     const f = files()

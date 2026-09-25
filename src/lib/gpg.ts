@@ -71,7 +71,7 @@ export async function findKey(fprOrName: string): Promise<KeyListing> {
   const keys = await listKeys(true)
   const q = fprOrName.replace(/\s+/g, '').toUpperCase()
   const hit = keys.find(k => k.fingerprint === q || k.fingerprint.endsWith(q) || k.userIDs.some(u => u.toLowerCase().includes(fprOrName.toLowerCase())))
-  if (!keys.length) throw new CliError(`No signing key in your gpg keyring. ${MAKE_KEY_HINT}`, EXIT.FAILED)
+  if (!keys.length) throw new CliError(`No secret keys in your gpg keyring. ${MAKE_KEY_HINT}`, EXIT.FAILED)
   if (!hit) throw new CliError(`No secret key matching "${fprOrName}" in your gpg keyring (thurin key list)`, EXIT.FAILED)
   return hit
 }
@@ -101,7 +101,7 @@ export async function signingKeyFor(fingerprint: string): Promise<string> {
   }
   if (primaryCanSign) return `${fingerprint}!`
   if (subs.length) return `${subs[subs.length - 1]}!`   // newest live signing subkey
-  throw new CliError(`Key ${fingerprint} has no usable signing key (primary is certify-only and no signing subkey)`, EXIT.FAILED)
+  throw new CliError(`Key ${fingerprint} can't sign (no signing subkey). Add one: gpg --quick-add-key ${fingerprint} ed25519 sign 2y`, EXIT.FAILED)
 }
 
 /**

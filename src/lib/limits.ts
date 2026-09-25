@@ -38,12 +38,12 @@ export class Limits {
 
   /** Throws a LimitError naming the first limit hit. `estEth` is the worst-case cost of this tx. */
   check(caller: string, owner: string, op: string, gas: bigint, estEth: number) {
-    if (gas > this.cfg.maxGas) throw new LimitError(`This call needs ${gas} gas; the relayer caps at ${this.cfg.maxGas}`, 403)
+    if (gas > this.cfg.maxGas) throw new LimitError(`This call needs ${gas} gas; the relay caps at ${this.cfg.maxGas}`, 403)
     const cutoff = this.now() - 3_600_000
     const recent = (this.callers.get(caller) || []).filter(t => t > cutoff)
-    if (recent.length >= this.cfg.perCallerPerHour) throw new LimitError('Too many requests from this address; try again in an hour', 429)
-    if (op === 'attest' && (this.attests.get(owner.toLowerCase()) || 0) >= this.cfg.attestsPerOwner) throw new LimitError(`This relayer pays for ${this.cfg.attestsPerOwner} attest per address`, 403)
-    if (this.spentLast24h() + estEth > this.cfg.budgetEth) throw new LimitError('The relayer has spent its budget for today; try again tomorrow, or publish it yourself', 503)
+    if (recent.length >= this.cfg.perCallerPerHour) throw new LimitError('Too many requests from you; try again in an hour', 429)
+    if (op === 'attest' && (this.attests.get(owner.toLowerCase()) || 0) >= this.cfg.attestsPerOwner) throw new LimitError(`This relay pays for ${this.cfg.attestsPerOwner} claim per address. Publish it yourself: thurin submit <file>`, 403)
+    if (this.spentLast24h() + estEth > this.cfg.budgetEth) throw new LimitError('The relay has spent its budget for today. Try again tomorrow, or publish it yourself: thurin submit <file>', 503)
   }
 
   /** Record a request that was sent (whatever it ends up costing). */

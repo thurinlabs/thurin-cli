@@ -14,7 +14,7 @@ describe('relayer limits', () => {
   it('pays for one attest per owner, but still relays their updates', () => {
     const l = new Limits(cfg)
     l.record('a', '0xAA', 'attest', 0.001)
-    expect(() => l.check('b', '0xaa', 'attest', 1n, 0)).toThrow(/1 attest per address/)
+    expect(() => l.check('b', '0xaa', 'attest', 1n, 0)).toThrow(/1 claim per address/)
     expect(() => l.check('b', '0xaa', 'update-key', 1n, 0)).not.toThrow()
   })
   it('rate-limits a caller per hour and forgets after', () => {

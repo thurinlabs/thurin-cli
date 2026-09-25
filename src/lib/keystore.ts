@@ -67,7 +67,7 @@ export function listKeystores(): { name: string; address: string }[] {
 export function saveKeystore(name: string, ks: KeystoreV3) {
   ensureKeystoreDir()
   const path = keystorePath(name)
-  if (existsSync(path)) throw new CliError(`Keystore "${name}" already exists at ${path}`, EXIT.USAGE)
+  if (existsSync(path)) throw new CliError(`Keystore "${name}" already exists at ${path}. Pick another name`, EXIT.USAGE)
   writeFileSync(path, JSON.stringify(ks, null, 2) + '\n', { mode: 0o600 })
   return path
 }
@@ -83,7 +83,7 @@ export function parseMnemonicOrKey(secret: string): { kind: 'mnemonic' | 'privat
     const pk = `0x${bytesToHex(acct.getHdKey().privateKey!)}` as `0x${string}`
     return { kind: 'mnemonic', account: acct, privateKey: pk }
   }
-  throw new CliError('Not a private key (64 hex) or a BIP-39 mnemonic', EXIT.USAGE)
+  throw new CliError('Not a private key (64 hex characters) or 12 words', EXIT.USAGE)
 }
 
 /**
@@ -93,9 +93,9 @@ export function parseMnemonicOrKey(secret: string): { kind: 'mnemonic' | 'privat
 export async function loadAccount(opts: { account?: string; passwordFile?: string }, prompt: (q: string) => Promise<string>): Promise<PrivateKeyAccount> {
   if (!opts.account && process.env.THURIN_PRIVATE_KEY) return privateKeyToAccount(process.env.THURIN_PRIVATE_KEY as `0x${string}`)
   const name = opts.account || readConfig().account
-  if (!name) throw new CliError('No account: pass --account <name>, set THURIN_PRIVATE_KEY, or `thurin wallet create`', EXIT.USAGE)
+  if (!name) throw new CliError('No keystore. Make one: thurin wallet create <name>. Or pass --account <name>, or set THURIN_PRIVATE_KEY', EXIT.USAGE)
   const path = existsSync(name) ? name : keystorePath(name)   // a path to any V3 file works too (e.g. ~/.foundry/keystores/x)
-  if (!existsSync(path)) throw new CliError(`No keystore "${name}" (thurin wallet list)`, EXIT.USAGE)
+  if (!existsSync(path)) throw new CliError(`No keystore "${name}". See: thurin wallet list`, EXIT.USAGE)
   const ks = JSON.parse(readFileSync(path, 'utf8')) as KeystoreV3
   const password = opts.passwordFile ? readFileSync(opts.passwordFile, 'utf8').replace(/\r?\n$/, '') : await prompt(`Password for ${name}: `)
   return privateKeyToAccount(decryptKeystore(ks, password))
