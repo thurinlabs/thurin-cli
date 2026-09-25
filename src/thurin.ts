@@ -90,7 +90,7 @@ const TOPICS: Record<string, string> = {
 More: thurin help no-eth   (your ETH is elsewhere, or you have none)
 `,
   'no-eth': `${bold('Your ETH is elsewhere, or you have none')}
-  (add these to attest, reattest, update-key, revoke, or record set)
+  (on attest, reattest, update-key, and record set; revoke takes --authorize only)
 
   --no-key --owner <address|ens>
       Sign here and publish from a wallet elsewhere, through a link.

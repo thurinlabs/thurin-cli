@@ -12,8 +12,8 @@ export interface LimitsConfig {
   attestsPerOwner: number
   /**
    * Hard cap on gas per transaction; bounds an owner whose contract wallet burns gas in
-   * isValidSignature. An attest stores the key + signature (SSTORE2, ~200 gas/byte): ~1.1M
-   * for a normal key, ~5.5M at the registry's 24,000-byte limit. 6M covers every honest call.
+   * isValidSignature. An attest stores the key + signature (SSTORE2, ~200 gas/byte): ~430k
+   * for an Ed25519 key, ~1.1M for a large RSA one, ~5.5M at the registry's 24,000-byte limit. 6M covers every honest call.
    */
   maxGas: bigint
 }

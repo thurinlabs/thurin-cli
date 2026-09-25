@@ -7,7 +7,7 @@ import { typedDataFor, type Handoff } from '../src/lib/handoff.js'
 
 // anvil #0: a public test key
 const acct = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80')
-const REGISTRY = '0x9302E02e2869e129aC8516fE5eFFd51EA3082c09'
+const REGISTRY = '0xFa6956c11163517249f8A67F5560a4406B519451'
 const h: Handoff = { v: 2, op: 'revoke', network: 'mainnet', owner: acct.address.toLowerCase(), fingerprint: 'A'.repeat(40), index: 0, includeEmail: false, authorization: { nonce: 0, deadline: 1_800_000_000, signature: '0x' } }
 
 describe('signer hook', () => {

@@ -26,7 +26,7 @@ thurinlabs.eth  0x539C7e1E454296Dc150B95a0acCC05bCa3b33538  (mainnet)
 claims      1 total · 1 active · 0 revoked
 fingerprint 08B9374FDFBEC67EFFA24E669D3D86E35361EF7B  ✓ verified
 name        Thurin Labs
-key         Ed25519 · created 2026-09-12 · expires 2028-09-11
+key         Ed25519 · created 2026-09-12 · claimed 2026-10-01 · expires 2028-09-11
 proofs
   ✓ GitHub     thurinlabs
   ✓ DNS        thurin.id
@@ -69,7 +69,7 @@ thurin attest --authorize --out auth.json    # the same as a file
 thurin submit auth.json                      # publish someone's permission from a funded keystore
 ```
 
-A `--no-key` link carries the key and signature after the `#`, which browsers never send to a server. A permission can be used once, before its deadline (default 7 days, `--deadline 1d`), and can't be recalled without ETH, so the deadline is printed every time. `reattest`, `update-key`, `revoke`, and `record set` take both flags.
+A `--no-key` link carries the key and signature after the `#`, which browsers never send to a server. A permission can be used once, before its deadline (default 7 days, `--deadline 1d`), and can't be recalled without ETH, so the deadline is printed every time. `reattest`, `update-key`, and `record set` take both flags; `revoke` takes `--authorize` only.
 
 The Ethereum key elsewhere too? `--signer "<cmd>"` hands the typed data to any program that signs it, and `--sign-out slip.json` then `thurin authorize finish slip.json --signature 0x…` crosses an air gap. The PGP key elsewhere? `--statement` prints the line to sign and `--key-file pub.gpg --statement-file s.sig` brings it back.
 

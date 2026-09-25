@@ -85,7 +85,7 @@ function render(i: any): string {
   L.push(bold(i.ensName ? `${i.ensName}  ${dim(i.address)}` : i.address) + dim(`  (${i.network})`))
   if (!i.claims.length) { L.push(`${label('claims')}${dim('none')}`); return L.join('\n') }
   const active = i.claims.filter((c: Claim) => !c.revokedAt).length
-  L.push(`${label('claims')}${i.claims.length} total · ${active} active · ${i.claims.length - active} revoked`)
+  L.push(`${label('claims')}${i.claims.length} total · ${active} active · ${i.claims.length - active} ended`)
   if (i.current) {
     L.push(`${label('fingerprint')}${i.current.fingerprint}  ${ok('✓ verified')}`)
     const soon = expiresSoon(i.current.verification)
