@@ -69,10 +69,11 @@ function checkLine(v: PGPVerification | null | undefined, mine: boolean): string
 
 function fateWord(f: ClaimFate | undefined, revoked: boolean): string {
   if (f?.state === 'replaced') return dim(`replaced → #${f.by}`)
+  if (f?.state === 'revoked') return dim(f.reason ? `revoked (${f.reason})` : 'revoked')
   return revoked ? dim('revoked') : 'active'
 }
 
-function stripKey(c: Claim) { const { pgpPublicKey, pgpSignature, keyInfo, ...rest } = c; return { ...rest, userIDs: keyInfo?.userIDs ?? [], algorithm: keyInfo?.algorithm ?? null, expires: keyInfo?.expires ?? null } }
+function stripKey(c: Claim) { const { pgpPublicKey, pgpSignature, keyInfo, keyHex, ...rest } = c; return { ...rest, userIDs: keyInfo?.userIDs ?? [], algorithm: keyInfo?.algorithm ?? null, expires: keyInfo?.expires ?? null } }
 
 function render(i: any): string {
   const L: string[] = []

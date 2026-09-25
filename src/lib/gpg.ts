@@ -6,18 +6,24 @@ import { CliError, EXIT } from './output.js'
  * material; passphrases are gpg's business (pinentry).
  */
 export function gpg(args: string[], input?: string): Promise<string> {
+  return gpgBytes(args, input).then(b => b.toString('utf8'))
+}
+
+/** gpg with binary output (a raw signature or key). */
+export function gpgBytes(args: string[], input?: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const child = spawn('gpg', ['--batch', '--no-tty', ...args], { stdio: ['pipe', 'pipe', 'pipe'] })
-    let out = '', err = ''
-    child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8')
-    child.stdout.on('data', d => { out += d })
+    const out: Buffer[] = []
+    let err = ''
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (d: Buffer) => { out.push(d) })
     child.stderr.on('data', d => { err += d })
     child.on('error', (e: any) => {
       if (e.code === 'ENOENT') reject(new CliError('gpg not found. Install GnuPG 2.2 or newer.', EXIT.FAILED))
       else reject(new CliError(`gpg failed to start: ${e.message}`, EXIT.FAILED))
     })
     child.on('close', code => {
-      if (code === 0) resolve(out)
+      if (code === 0) resolve(Buffer.concat(out))
       else reject(new CliError(`gpg ${args.find(a => a.startsWith('--')) ?? ''} failed: ${err.trim().split('\n').slice(-3).join(' ')}`, EXIT.FAILED))
     })
     if (input !== undefined) child.stdin.write(input)
@@ -97,9 +103,10 @@ export async function signingKeyFor(fingerprint: string): Promise<string> {
   throw new CliError(`Key ${fingerprint} has no usable signing key (primary is certify-only and no signing subkey)`, EXIT.FAILED)
 }
 
-export async function clearsign(fingerprint: string, text: string): Promise<string> {
+/** A raw detached text-mode signature over exactly `text` (no trailing line break), as a claim stores it. */
+export async function detachSign(fingerprint: string, text: string): Promise<Uint8Array> {
   const signer = await signingKeyFor(fingerprint)
-  return gpg(['--clearsign', '--armor', '-u', signer], text + '\n')
+  return new Uint8Array(await gpgBytes(['--detach-sign', '--textmode', '-u', signer], text))
 }
 
 export async function exportMinimal(fingerprint: string): Promise<string> {

@@ -1,8 +1,8 @@
-import { createPublicClient, http, hexToString, type Address, type PublicClient, type Chain } from 'viem'
+import { createPublicClient, http, type Address, type Hex, type PublicClient, type Chain } from 'viem'
 import { normalize } from 'viem/ens'
 import {
-  REGISTRY_ABI, getRegistry, chainFor, isNetworkName, parsePgpKey, verifyAttestation,
-  bytesToFingerprint, fingerprintHash, fingerprintToBytes, keyIdToBytes,
+  REGISTRY_ABI, getRegistry, chainFor, isNetworkName, parsePgpKey, verifyAttestation, payloadText,
+  bytesToFingerprint, fingerprintToBytes, keyIdToBytes,
   type NetworkName, type PGPKeyInfo, type PGPVerification,
 } from '@thurinlabs/identity-kit/core'
 import { readConfig } from './config.js'
@@ -27,37 +27,46 @@ export function chainCtx(opts: { network?: string; rpc?: string }): ChainCtx {
   return { network: net, rpcUrl, client, registry: reg.address as Address, explorerUrl: reg.explorerUrl }
 }
 
-/** A claim as the CLI shows it: the on-chain row plus the stored payload and its verification. */
+/** A claim as the CLI shows it: the on-chain row plus the stored key and signature, and their verification. */
 export interface Claim {
   index: number
   fingerprint: string
   createdAt: number
   revokedAt: number | null
+  state: 'active' | 'revoked' | 'replaced'
+  replacedBy: number | null
+  revokeReason: string
   messageVersion: number
+  /** The key exactly as stored, 0x hex. */
+  keyHex: Hex | null
+  /** The key as armored text. */
   pgpPublicKey: string | null
+  /** The signature as armored text, or the stored clearsigned message. */
   pgpSignature: string | null
   verification: PGPVerification | null
   keyInfo: PGPKeyInfo | null
 }
 
 export async function claimsOf(ctx: ChainCtx, owner: Address): Promise<Claim[]> {
-  const rows = await readRegistry<any[]>(ctx, 'attestationsOf', [owner])
+  const rows = await readRegistry<any[]>(ctx, 'claimsOf', [owner])
   const claims: Claim[] = []
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i]
     const fingerprint = bytesToFingerprint(r.fingerprint).toUpperCase()
-    let pgpPublicKey: string | null = null, pgpSignature: string | null = null
+    let keyHex: Hex | null = null, pgpPublicKey: string | null = null, pgpSignature: string | null = null
     try {
-      const [sig, key] = await readRegistry<[string, string]>(ctx, 'getPayload', [owner, BigInt(i)])
-      pgpSignature = hexToString(sig as `0x${string}`); pgpPublicKey = hexToString(key as `0x${string}`)
-    } catch { /* payload unreadable: shown as unverified */ }
+      keyHex = await readRegistry<Hex>(ctx, 'keyBytes', [owner, BigInt(i)])
+      pgpPublicKey = await payloadText(keyHex, 'key')
+      pgpSignature = await payloadText(await readRegistry<Hex>(ctx, 'signatureBytes', [owner, BigInt(i)]), 'signature')
+    } catch { /* unreadable: shown as unverified */ }
     const verification = pgpPublicKey && pgpSignature
       ? await verifyAttestation({ pgpPublicKey, pgpSignature, fingerprint, ethAddress: owner })
       : { verified: false, reason: 'No PGP data stored' }
     const keyInfo = pgpPublicKey ? await parsePgpKey(pgpPublicKey) : null
     claims.push({
       index: i, fingerprint, createdAt: Number(r.createdAt), revokedAt: Number(r.revokedAt) || null,
-      messageVersion: Number(r.messageVersion), pgpPublicKey, pgpSignature, verification, keyInfo,
+      state: r.state, replacedBy: r.state === 'replaced' ? Number(r.replacedBy) : null, revokeReason: r.revokeReason,
+      messageVersion: Number(r.messageVersion), keyHex, pgpPublicKey, pgpSignature, verification, keyInfo,
     })
   }
   return claims
@@ -103,7 +112,7 @@ export async function resolveOwners(ctx: ChainCtx, lookup: Lookup): Promise<{ ow
     fps = [fingerprintToBytes(lookup.value) as `0x${string}`]
   }
   const owners: Address[] = []
-  for (const fp of fps) owners.push(...await readRegistry<Address[]>(ctx, 'addressesFor', [fingerprintHash(fp)]))
+  for (const fp of fps) owners.push(...await readRegistry<Address[]>(ctx, 'ownersOf', [fp]))
   if (!owners.length) throw new CliError(`No claim in the registry for fingerprint ${lookup.value}`, EXIT.FAILED)
   return { owners: [...new Set(owners)] }
 }

@@ -7,14 +7,14 @@ import {
 } from '../src/lib/handoff.js'
 
 const h: Handoff = {
-  v: 1, op: 'attest', network: 'mainnet',
+  v: 2, op: 'attest', network: 'mainnet',
   owner: '0xd730182053bb2365d15b2b1be68542c760cb7f10',
   fingerprint: '03E53D807CE38C130ED42ECECD3D0D7F0C9E5FB8',
-  key: '-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nmDMEZ…\n-----END PGP PUBLIC KEY BLOCK-----\n',
-  signature: '-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA512\n\nI control the Ethereum address: 0xd730182053bb2365d15b2b1be68542c760cb7f10\n-----BEGIN PGP SIGNATURE-----\n…\n-----END PGP SIGNATURE-----\n',
+  key: '0xc60b0400000000160900000000',
+  signature: '0xc20b0401160a00000000000000',
   includeEmail: false,
 }
-const REGISTRY = '0x9302E02e2869e129aC8516fE5eFFd51EA3082c09'
+const REGISTRY = '0x4f2d70799cAAD651C7c564426AA74A842c1331B6'
 // Hardhat/anvil account #0 — a well-known test key, never funded on a real network.
 const acct = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80')
 
@@ -30,6 +30,9 @@ describe('hand-off link', () => {
   })
   it('refuses anything that is not a hand-off', () => {
     expect(() => decodeHandoff(Buffer.from('{"v":2}').toString('base64url'))).toThrow(/Not a Thurin hand-off/)
+    expect(() => decodeHandoff(encodeHandoff({ ...h, v: 1 } as any))).toThrow(/format 1/)
+    expect(() => decodeHandoff(encodeHandoff({ ...h, key: '-----BEGIN PGP PUBLIC KEY BLOCK-----' }))).toThrow(/no key/)
+    expect(() => decodeHandoff(encodeHandoff({ ...h, op: 'revoke', index: 0, reason: 'lost' as any }))).toThrow(/revoke reason/)
     expect(() => decodeHandoff(encodeHandoff({ ...h, authorization: { nonce: 0, deadline: 1, signature: '0x12' } }))).toThrow(/malformed authorization/)
     expect(() => readHandoffInput('what')).toThrow(/hand-off/)
   })
@@ -41,9 +44,10 @@ describe('authorization', () => {
     const base = { ...h, owner, authorization: { nonce: 3, deadline: 1_800_000_000, signature: '0x' as `0x${string}` } }
     const cases: Handoff[] = [
       { ...base, op: 'attest' },
-      { ...base, op: 'reattest', index: 1 },
+      { ...base, op: 'reattest', index: 1, keepRecords: false },
       { ...base, op: 'update-key', index: 0, signature: undefined },
-      { ...base, op: 'revoke', index: 2, key: undefined, signature: undefined },
+      { ...base, op: 'revoke', index: 2, key: undefined, signature: undefined, reason: 'compromised' },
+      { ...base, op: 'set-record', index: 0, key: undefined, signature: undefined, kind: 'security', value: 'mailto:x@example.com' },
     ]
     for (const c of cases) {
       const typed = typedDataFor(c, 1, REGISTRY)
@@ -55,6 +59,10 @@ describe('authorization', () => {
       expect(args[args.length - 1]).toBe(sig)
       expect(args[args.length - 2]).toBe(1_800_000_000n)
     }
+    const re = forArgsOf({ ...cases[1], authorization: { ...cases[1].authorization!, signature: '0x' } })
+    expect(re[5]).toBe(false)                              // keepRecords
+    const rv = forArgsOf({ ...cases[3], authorization: { ...cases[3].authorization!, signature: '0x' } })
+    expect(rv[2]).toBe('compromised')
   })
   it('binds the chain: a Sepolia signature does not recover on mainnet', async () => {
     const c: Handoff = { ...h, owner: acct.address.toLowerCase(), authorization: { nonce: 0, deadline: 1_800_000_000, signature: '0x' } }

@@ -1,82 +1,92 @@
-import { stringToHex, isAddress, getAddress, recoverTypedDataAddress, type Address } from 'viem'
+import { toHex, isAddress, getAddress, recoverTypedDataAddress, type Address } from 'viem'
 import { writeFileSync, readFileSync } from 'node:fs'
 import { normalize } from 'viem/ens'
 import {
-  REGISTRY_ABI, parsePgpKey, verifyAttestation, stripEmailUserIDs, identifyProof, fingerprintToBytes,
+  REGISTRY_ABI, parsePgpKey, verifyAttestation, leanKey, claimSignature, identifyProof, fingerprintToBytes, REVOKE_REASONS,
+  type RevokeReason,
 } from '@thurinlabs/identity-kit/core'
 import { chainCtx, claimsOf, type ChainCtx } from '../lib/chain.js'
-import { findKey, clearsign, exportMinimal, attestStatement } from '../lib/gpg.js'
+import { findKey, detachSign, exportMinimal, attestStatement } from '../lib/gpg.js'
 import { loadAccount } from '../lib/keystore.js'
 import { accountSigner, commandSigner, fileSigner, providedSigner, readSignatureFile, readSignOut, SignLater, type Signer } from '../lib/signer.js'
 import { prompt, confirm } from '../lib/prompt.js'
 import { readConfig } from '../lib/config.js'
 import { out, info, ok, bad, dim, bold, label, isJson, CliError, EXIT } from '../lib/output.js'
 import {
-  handoffUrl, readHandoffInput, typedDataFor, forArgsOf, parseDeadline, describeDeadline, FOR_FN,
+  handoffUrl, readHandoffInput, typedDataFor, forArgsOf, payloadArg, parseDeadline, describeDeadline, FOR_FN,
   type Handoff, type HandoffOp,
 } from '../lib/handoff.js'
 
-const MAX_KEY = 8192, MAX_SIG = 4096
+const MAX_KEY = 16384, MAX_SIG = 8192, MAX_PAYLOAD = 24000   // the registry's limits
 
 /**
  * --key-file / --statement-file: the PGP half was done somewhere gpg on this machine can't reach
  * (a card behind a QR link, an air-gapped box, a phone). Take the bytes; every check still runs.
+ * Either file may be armored or binary; the statement may be a detached signature or clearsigned.
  */
-export interface PresignedInputs { armored: string; signature?: string }
+export interface PresignedInputs { key: string | Uint8Array; signature?: string | Uint8Array }
 
 export function presignedInputs(opts: Record<string, any>): PresignedInputs | null {
   if (!opts.keyFile && !opts.statementFile) return null
   if (!opts.keyFile) throw new CliError('--statement-file needs --key-file <pub.asc>: the public key the statement was signed with', EXIT.USAGE)
-  const read = (path: string) => { try { return readFileSync(path, 'utf8').trim() } catch (e: any) { throw new CliError(`Cannot read ${path}: ${e.message}`, EXIT.USAGE) } }
-  const armored = read(opts.keyFile)
-  if (!armored.includes('-----BEGIN PGP PUBLIC KEY BLOCK-----')) throw new CliError(`${opts.keyFile} is not an armored public key (expected -----BEGIN PGP PUBLIC KEY BLOCK-----; gpg --armor --export <fpr>)`, EXIT.USAGE)
-  if (!opts.statementFile) return { armored }
-  const signature = read(opts.statementFile)
-  if (!signature.includes('-----BEGIN PGP SIGNED MESSAGE-----')) throw new CliError(`${opts.statementFile} is not a clearsigned message (expected -----BEGIN PGP SIGNED MESSAGE-----): sign the statement with --clearsign, not --detach-sign`, EXIT.USAGE)
-  return { armored, signature }
+  const read = (path: string): string | Uint8Array => {
+    let b: Buffer
+    try { b = readFileSync(path) } catch (e: any) { throw new CliError(`Cannot read ${path}: ${e.message}`, EXIT.USAGE) }
+    return b[0] === 0x2d ? b.toString('utf8').trim() : new Uint8Array(b)   // '-': armored text
+  }
+  const key = read(opts.keyFile)
+  if (!opts.statementFile) return { key }
+  return { key, signature: read(opts.statementFile) }
 }
 
 /** The fingerprint a run is about: from gpg, or from the key file when the key is not here. */
 async function keyFor(opts: Record<string, any>, pre: PresignedInputs | null): Promise<string> {
   if (!pre) return (await findKey(opts.key || readConfig().key || '')).fingerprint
-  const info_ = await parsePgpKey(pre.armored)
-  if (!info_) throw new CliError(`${opts.keyFile} does not parse as a PGP public key`, EXIT.FAILED)
+  const info_ = await parsePgpKey(pre.key)
+  if (!info_) throw new CliError(`${opts.keyFile} does not parse as a PGP public key (gpg --export <fpr> > pub.gpg)`, EXIT.FAILED)
   const fpr = info_.fingerprint.toUpperCase()
   const wanted = String(opts.key || '').replace(/^0x/i, '').replace(/\s/g, '').toUpperCase()   // only an explicit --key; a configured default would false-alarm
   if (wanted && !fpr.endsWith(wanted)) throw new CliError(`${opts.keyFile} holds ${fpr}, not --key ${opts.key}`, EXIT.USAGE)
   return fpr
 }
 
-/** Everything the registry and the explorer will check, run before any gas is spent. */
+const byteLength = (v: string | Uint8Array) => typeof v === 'string' ? new TextEncoder().encode(v).length : v.length
+
+/**
+ * Everything the registry and a lookup will check, run before any gas is spent. The key goes
+ * on-chain lean (raw bytes, emails left out unless asked, SSH-only subkeys left out) and the
+ * signature as its raw packet: exactly what thurin.id publishes.
+ */
 export async function preflight(ctx: ChainCtx, owner: Address, fpr: string, includeEmail: boolean, needSignature: boolean, source: PresignedInputs | null = null) {
-  const full = source ? source.armored : await exportMinimal(fpr)
-  let armored = full, kept: string[] = [], removed: string[] = []
-  if (includeEmail) { kept = (await parsePgpKey(full))?.userIDs ?? [] }
-  else {
-    const s = await stripEmailUserIDs(full)
-    if (!s) throw new CliError(`Every name on ${fpr} contains an email. Add one without: thurin key add-name ${fpr} thurin — or pass --include-email`, EXIT.FAILED)
-    armored = s.armored; kept = s.kept; removed = s.removed
-  }
-  const info_ = await parsePgpKey(armored)
+  const full = source ? source.key : await exportMinimal(fpr)
+  const lean = await leanKey(full, { includeEmail })
+  if (!lean) throw new CliError(`Every name on ${fpr} contains an email. Add one without: thurin key add-name ${fpr} thurin — or pass --include-email`, EXIT.FAILED)
+  const info_ = await parsePgpKey(lean.binary)
   if (!info_) throw new CliError('Exported key does not parse', EXIT.FAILED)
   if (info_.fingerprint.toUpperCase() !== fpr.toUpperCase()) throw new CliError('Exported key fingerprint does not match', EXIT.FAILED)
   const proofs = info_.notations.map(identifyProof).filter(Boolean)
-  const bytes = new TextEncoder().encode(armored).length
-  if (bytes > MAX_KEY) throw new CliError(`Key is ${bytes} bytes; the registry accepts up to ${MAX_KEY}`, EXIT.FAILED)
-  let signature: string | null = null
+  if (lean.binary.length > MAX_KEY) throw new CliError(`Key is ${lean.binary.length} bytes; the registry accepts up to ${MAX_KEY}`, EXIT.FAILED)
+  let signature: string | null = null   // 0x hex, or a clearsigned message kept whole
+  let sigBytes = 0
   if (needSignature) {
+    let raw: string | Uint8Array
     if (source) {
-      if (!source.signature) throw new CliError(`The signed statement is needed too: --statement-file <signed.asc>. The line to sign: thurin attest --statement --owner ${owner}`, EXIT.USAGE)
-      signature = source.signature
+      if (!source.signature) throw new CliError(`The signature is needed too: --statement-file <sig>. The line to sign: thurin attest --statement --owner ${owner}`, EXIT.USAGE)
+      raw = source.signature
     } else {
       info(`Signing "${attestStatement(owner)}" with ${fpr} (gpg will ask for the passphrase).`)
-      signature = await clearsign(fpr, attestStatement(owner))
+      raw = await detachSign(fpr, attestStatement(owner))
     }
-    if (new TextEncoder().encode(signature).length > MAX_SIG) throw new CliError('Signature too large', EXIT.FAILED)
-    const v = await verifyAttestation({ pgpPublicKey: armored, pgpSignature: signature, fingerprint: fpr, ethAddress: owner })
-    if (!v.verified) throw new CliError(`The signature does not verify against the ${source ? 'given' : 'exported'} key: ${v.reason}${source ? `\nThe statement must be exactly: ${attestStatement(owner)}` : ''}`, EXIT.FAILED)
+    const cs = await claimSignature({ signature: raw, key: lean.binary, address: owner })
+    if (!cs) throw new CliError(`${source ? 'The statement file' : 'The signature'} is not a PGP signature`, EXIT.FAILED)
+    signature = typeof cs.signature === 'string' ? cs.signature : toHex(cs.signature)
+    sigBytes = byteLength(cs.signature)
+    if (sigBytes > MAX_SIG) throw new CliError(`Signature is ${sigBytes} bytes; the registry accepts up to ${MAX_SIG}`, EXIT.FAILED)
+    if (sigBytes + lean.binary.length > MAX_PAYLOAD) throw new CliError(`Key and signature are ${sigBytes + lean.binary.length} bytes together; the registry accepts up to ${MAX_PAYLOAD}`, EXIT.FAILED)
+    const v = await verifyAttestation({ pgpPublicKey: lean.binary, pgpSignature: cs.signature, fingerprint: fpr, ethAddress: owner })
+    if (!v.verified) throw new CliError(`The signature does not verify against the ${source ? 'given' : 'exported'} key: ${v.reason}${source ? `\nSign exactly this line, with no line break after it: printf '%s' '${attestStatement(owner)}' | gpg --detach-sign --textmode` : ''}`, EXIT.FAILED)
   }
-  return { armored, signature, kept, removed, proofs: proofs.length, bytes }
+  return { key: toHex(lean.binary), signature, kept: lean.kept, removed: lean.removed, proofs: proofs.length, bytes: lean.binary.length + sigBytes }
 }
 
 function summary(p: Awaited<ReturnType<typeof preflight>>) {
@@ -171,11 +181,13 @@ type Preflight = Awaited<ReturnType<typeof preflight>>
 
 function buildHandoff(ctx: ChainCtx, opts: Record<string, any>, op: HandoffOp, owner: Address, fpr: string, p: Preflight | null, index?: number): Handoff {
   return {
-    v: 1, op, network: ctx.network, owner: owner.toLowerCase(), fingerprint: fpr.toUpperCase(),
-    ...(p ? { key: p.armored } : {}),
+    v: 2, op, network: ctx.network, owner: owner.toLowerCase(), fingerprint: fpr.toUpperCase(),
+    ...(p ? { key: p.key } : {}),
     includeEmail: !!opts.includeEmail,
     ...(p?.signature ? { signature: p.signature } : {}),
     ...(index !== undefined ? { index } : {}),
+    ...(op === 'reattest' ? { keepRecords: !opts.dropRecords } : {}),
+    ...(op === 'revoke' ? { reason: revokeReason(opts) } : {}),
     ...(opts._record ? { kind: opts._record.kind, value: opts._record.value } : {}),
   }
 }
@@ -347,7 +359,7 @@ export async function attest(_args: string[], opts: Record<string, any>) {
   if (!isJson()) process.stderr.write(summary(p) + '\n')
   if (opts.authorize) return authorize(ctx, opts, 'attest', owner, fpr, p)
   if (opts.noKey) return handoff(ctx, opts, 'attest', owner, fpr, p)
-  const r = await send(ctx, opts, 'attest', [fingerprintToBytes(fpr), stringToHex(p.signature!), stringToHex(p.armored)], 'Publish claim')
+  const r = await send(ctx, opts, 'attest', [fingerprintToBytes(fpr), payloadArg(p.signature!), p.key], 'Publish claim')
   out({ ...r, owner, fingerprint: fpr, proofs: p.proofs, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
     `${ok('Published')} ${bold(fpr)} for ${owner}\n${label('tx')}${txUrl(ctx, r.hash)}\n${label('identity')}${identityUrl(ctx, owner)}`)
 }
@@ -363,11 +375,11 @@ export async function updateKey(args: string[], opts: Record<string, any>) {
   if (c.revokedAt) throw new CliError(`Claim #${idx} is revoked`, EXIT.FAILED)
   const includeEmail = opts.includeEmail ?? (c.keyInfo?.userIDs.some(u => u.includes('@')) ?? false)
   const p = await preflight(ctx, owner, c.fingerprint, includeEmail, false, pre)
-  if (p.armored === c.pgpPublicKey) throw new CliError(`The ${pre ? 'given' : 'exported'} key is identical to the one on-chain; nothing to update`, EXIT.FAILED)
+  if (c.keyHex && p.key.toLowerCase() === c.keyHex.toLowerCase()) throw new CliError(`The ${pre ? 'given' : 'exported'} key is identical to the one on-chain; nothing to update`, EXIT.FAILED)
   if (!isJson()) process.stderr.write(summary(p) + '\n')
   if (opts.authorize) return authorize(ctx, { ...opts, includeEmail }, 'update-key', owner, c.fingerprint, p, idx)
   if (opts.noKey) return handoff(ctx, { ...opts, includeEmail }, 'update-key', owner, c.fingerprint, p, idx)
-  const r = await send(ctx, opts, 'updateKey', [BigInt(idx), stringToHex(p.armored)], `Update key on claim #${idx}`)
+  const r = await send(ctx, opts, 'updateKey', [BigInt(idx), p.key], `Update key on claim #${idx}`)
   out({ ...r, owner, index: idx, proofs: p.proofs, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
     `${ok('Updated')} claim #${idx}: ${p.proofs} proofs\n${label('tx')}${txUrl(ctx, r.hash)}\n${label('identity')}${identityUrl(ctx, owner)}`)
 }
@@ -384,7 +396,7 @@ export async function reattest(args: string[], opts: Record<string, any>) {
   if (!isJson()) process.stderr.write(summary(p) + '\n')
   if (opts.authorize) return authorize(ctx, opts, 'reattest', owner, fpr, p, idx)
   if (opts.noKey) return handoff(ctx, opts, 'reattest', owner, fpr, p, idx)
-  const r = await send(ctx, opts, 'reattest', [BigInt(idx), fingerprintToBytes(fpr), stringToHex(p.signature!), stringToHex(p.armored)], `Revoke #${idx} and publish a new claim`)
+  const r = await send(ctx, opts, 'reattest', [BigInt(idx), fingerprintToBytes(fpr), payloadArg(p.signature!), p.key, !opts.dropRecords], `Revoke #${idx} and publish a new claim${opts.dropRecords ? '' : ' (its records move to the new one)'}`)
   out({ ...r, owner, revoked: idx, fingerprint: fpr, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
     `${ok('Replaced')} claim #${idx} with ${bold(fpr)}\n${label('tx')}${txUrl(ctx, r.hash)}\n${label('identity')}${identityUrl(ctx, owner)}`)
 }
@@ -396,9 +408,17 @@ export async function revoke(args: string[], opts: Record<string, any>) {
   const claims = await claimsOf(ctx, owner)
   const idx = pickIndex(args[0], claims)
   if (claims[idx].revokedAt) throw new CliError(`Claim #${idx} is already revoked`, EXIT.FAILED)
+  const reason = revokeReason(opts)
   if (opts.authorize) return authorize(ctx, opts, 'revoke', owner, claims[idx].fingerprint, null, idx)
-  const r = await send(ctx, opts, 'revoke', [BigInt(idx)], `Revoke claim #${idx} (${claims[idx].fingerprint})`)
+  const r = await send(ctx, opts, 'revoke', [BigInt(idx), reason], `Revoke claim #${idx} (${claims[idx].fingerprint})${reason ? ` as ${reason}` : ''}`)
   out({ ...r, owner, index: idx, tx: txUrl(ctx, r.hash) }, () => `${bad('Revoked')} claim #${idx}\n${label('tx')}${txUrl(ctx, r.hash)}`)
+}
+
+/** --reason for revoke: compromised, retired, superseded, other, or none. */
+function revokeReason(opts: Record<string, any>): RevokeReason {
+  const r = String(opts.reason ?? '').toLowerCase()
+  if (!(REVOKE_REASONS as readonly string[]).includes(r)) throw new CliError(`--reason must be one of: ${REVOKE_REASONS.filter(Boolean).join(', ')}`, EXIT.USAGE)
+  return r as RevokeReason
 }
 
 export function pickIndex(arg: string | undefined, claims: { revokedAt: number | null }[]): number {

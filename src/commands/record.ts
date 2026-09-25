@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { stringToHex, type Address, type Hex } from 'viem'
+import { type Address } from 'viem'
 import { chainCtx, claimsOf, resolveOwners, detectLookup, readRegistry, type ChainCtx } from '../lib/chain.js'
-import { REGISTRY_ABI, recordKind, encodeRecord, decodeRecord, parsePointer, addPointer, renderPointer, kindName, KNOWN_KINDS } from '@thurinlabs/identity-kit/core'
+import { parsePointer, addPointer, renderPointer, checkKindName, checkRecordValue, KNOWN_KINDS } from '@thurinlabs/identity-kit/core'
 import { send, ownerFor, pickIndex, handoff, authorize } from './attest.js'
 import { out, info, ok, bad, dim, bold, label, isJson, CliError, EXIT } from '../lib/output.js'
 
@@ -12,33 +12,36 @@ export async function record(args: string[], opts: Record<string, any>) {
     case 'set': return recordSet(args.slice(1), opts)
     case 'clear': return recordSet([args[1], ''], opts)
     case 'add-release': return addRelease(args.slice(1), opts)
-    default: throw new CliError('Usage: thurin record <get <identity> <kind> | set <kind> <value|--file f> | clear <kind> | add-release <name> <SHA256SUMS> [--url u]> [--index n]', EXIT.USAGE)
+    default: throw new CliError('Usage: thurin record <get <identity> [kind] | set <kind> <value|--file f> | clear <kind> | add-release <name> <SHA256SUMS> [--url u]> [--index n]', EXIT.USAGE)
   }
 }
 
-async function readRecord(ctx: ChainCtx, owner: Address, index: number, kind: string): Promise<string> {
-  const hex = await readRegistry<Hex>(ctx, 'record', [owner, BigInt(index), recordKind(kind)])
-  return decodeRecord(hex)
+/** A claim's records from `recordsOf`, as [name, value] pairs in the order they were first set. */
+async function recordsOnClaim(ctx: ChainCtx, owner: Address, index: number): Promise<[string, string][]> {
+  const [names, values] = await readRegistry<[string[], string[]]>(ctx, 'recordsOf', [owner, BigInt(index)])
+  return names.map((n, i) => [n, values[i]] as [string, string])
 }
 
-/** thurin record get <identity> <kind>: anyone can read; prints the value (pretty for known kinds). */
+/** thurin record get <identity> [kind]: anyone can read; one kind, or every record on each active claim. */
 async function recordGet(args: string[], opts: Record<string, any>) {
-  if (!args[0] || !args[1]) throw new CliError('Usage: thurin record get <ens|0x|fingerprint> <kind>  (kinds: ' + KNOWN_KINDS.join(', ') + ')', EXIT.USAGE)
+  if (!args[0]) throw new CliError('Usage: thurin record get <ens|0x|fingerprint> [kind]  (kinds: ' + KNOWN_KINDS.join(', ') + ')', EXIT.USAGE)
   const ctx = chainCtx(opts)
-  const kind = kindName(args[1])
+  let kind: string | null = null
+  if (args[1]) { try { kind = checkKindName(args[1]) } catch (e: any) { throw new CliError(e.message, EXIT.USAGE) } }
   const { owners } = await resolveOwners(ctx, detectLookup(args[0]))
-  const results: { owner: Address; index: number; fingerprint: string; value: string }[] = []
+  const results: { owner: Address; index: number; fingerprint: string; kind: string; value: string }[] = []
   for (const owner of owners) {
     const claims = (await claimsOf(ctx, owner)).filter(c => !c.revokedAt)
     for (const c of claims) {
-      const value = await readRecord(ctx, owner, c.index, kind)
-      if (value) results.push({ owner, index: c.index, fingerprint: c.fingerprint, value })
+      for (const [k, value] of await recordsOnClaim(ctx, owner, c.index)) {
+        if (value && (!kind || k === kind)) results.push({ owner, index: c.index, fingerprint: c.fingerprint, kind: k, value })
+      }
     }
   }
-  if (!results.length) throw new CliError(`No ${kind} record on any active claim of ${args[0]}`, EXIT.FAILED)
+  if (!results.length) throw new CliError(`No ${kind ?? ''} record${kind ? '' : 's'} on any active claim of ${args[0]}`.replace('  ', ' '), EXIT.FAILED)
   out({ kind, records: results }, () => results.map(r => {
-    const head = `${label('owner')}${r.owner}  claim #${r.index}  ${dim(r.fingerprint)}\n${label('kind')}${kind}`
-    if (kind === 'thurin.pointer') { try { return `${head}\n${renderPointer(parsePointer(r.value))}` } catch { /* fall through */ } }
+    const head = `${label('owner')}${r.owner}  claim #${r.index}  ${dim(r.fingerprint)}\n${label('kind')}${r.kind}`
+    if (r.kind === 'thurin.pointer') { try { return `${head}\n${renderPointer(parsePointer(r.value))}` } catch { /* fall through */ } }
     return `${head}\n${r.value}`
   }).join('\n\n'))
 }
@@ -46,20 +49,21 @@ async function recordGet(args: string[], opts: Record<string, any>) {
 /** thurin record set <kind> <value|--file f> [--index n]: the owner writes; '' clears. */
 async function recordSet(args: string[], opts: Record<string, any>) {
   if (!args[0]) throw new CliError('Usage: thurin record set <kind> <value|--file f> [--index n]', EXIT.USAGE)
-  const kind = kindName(args[0])
-  const value = opts.file ? readFileSync(opts.file, 'utf8') : (args[1] ?? '')
+  let kind: string, value: string
+  try {
+    kind = checkKindName(args[0])
+    value = checkRecordValue(opts.file ? readFileSync(opts.file, 'utf8') : (args[1] ?? ''))
+  } catch (e: any) { throw new CliError(e.message, EXIT.USAGE) }
   const ctx = chainCtx(opts)
   const owner = await ownerFor(ctx, opts)
   const claims = await claimsOf(ctx, owner)
   const idx = opts.index !== undefined ? Number(opts.index) : pickIndex(undefined, claims)
   if (!claims[idx]) throw new CliError(`No claim #${idx}`, EXIT.USAGE)
-  let hex: Hex
-  try { hex = value ? encodeRecord(value) : '0x' } catch (e: any) { throw new CliError(e.message, EXIT.FAILED) }
   if (!isJson()) process.stderr.write(`${label('claim')}#${idx} ${claims[idx].fingerprint}\n${label('kind')}${kind}\n${label('value')}${value ? `${new TextEncoder().encode(value).length} bytes` : dim('(clear)')}\n`)
   const o = { ...opts, _record: { kind, value } }
   if (opts.authorize) return authorize(ctx, o, 'set-record', owner, claims[idx].fingerprint, null, idx)
   if (opts.noKey) return handoff(ctx, o, 'set-record', owner, claims[idx].fingerprint, null, idx)
-  const r = await send(ctx, opts, 'setRecord', [BigInt(idx), recordKind(kind), hex], value ? `Set ${kind} on claim #${idx}` : `Clear ${kind} on claim #${idx}`)
+  const r = await send(ctx, opts, 'setRecord', [BigInt(idx), kind, value], value ? `Set ${kind} on claim #${idx}` : `Clear ${kind} on claim #${idx}`)
   out({ ...r, owner, index: idx, kind, bytes: value.length }, () => `${ok(value ? 'Set' : 'Cleared')} ${kind} on claim #${idx}\n${label('tx')}${ctx.explorerUrl ? `${ctx.explorerUrl}/tx/${r.hash}` : r.hash}`)
 }
 
@@ -77,7 +81,7 @@ async function addRelease(args: string[], opts: Record<string, any>) {
   const claims = await claimsOf(ctx, owner)
   const idx = opts.index !== undefined ? Number(opts.index) : pickIndex(undefined, claims)
   if (!claims[idx]) throw new CliError(`No claim #${idx}`, EXIT.USAGE)
-  const existingText = await readRecord(ctx, owner, idx, 'thurin.pointer')
+  const existingText = await readRegistry<string>(ctx, 'recordText', [owner, BigInt(idx), 'thurin.pointer'])
   let existing = null
   if (existingText) { try { existing = parsePointer(existingText) } catch { throw new CliError('The existing thurin.pointer record is not v1; edit it with record set', EXIT.FAILED) } }
   const { record: rec, dropped } = addPointer(existing, { name, sha256, date: new Date().toISOString().slice(0, 10), ...(opts.url ? { url: opts.url } : {}) })
@@ -89,6 +93,6 @@ async function addRelease(args: string[], opts: Record<string, any>) {
   const o = { ...opts, _record: { kind: 'thurin.pointer', value: text } }
   if (opts.authorize) return authorize(ctx, o, 'set-record', owner, claims[idx].fingerprint, null, idx)
   if (opts.noKey) return handoff(ctx, o, 'set-record', owner, claims[idx].fingerprint, null, idx)
-  const r = await send(ctx, opts, 'setRecord', [BigInt(idx), recordKind('thurin.pointer'), stringToHex(text)], `Name release "${name}" on claim #${idx}`)
+  const r = await send(ctx, opts, 'setRecord', [BigInt(idx), 'thurin.pointer', text], `Name release "${name}" on claim #${idx}`)
   out({ ...r, owner, index: idx, name, sha256, releases: rec.releases.length }, () => `${ok('Named')} ${bold(name)} on-chain\n${label('tx')}${ctx.explorerUrl ? `${ctx.explorerUrl}/tx/${r.hash}` : r.hash}\n${label('check')}thurin record get ${owner} thurin.pointer`)
 }

@@ -48,14 +48,16 @@ thurin attest                       # signs the statement with gpg, checks every
 
 The address needs a little ETH for the fee. Already have a key and a wallet? `thurin attest --key <fingerprint> --account <keystore name>`, or `--account path/to/any-v3-keystore.json` (Foundry's `~/.foundry/keystores/*` work as they are). `THURIN_PRIVATE_KEY` in the environment also works, for scripts.
 
-Before publishing, `attest` exports a minimal copy of your key, leaves out every name that contains an email (pass `--include-email` to keep them), signs `I control the Ethereum address: 0x…` with your key, verifies that signature against the export exactly the way thurin.id will, checks the size limits and that no active claim already exists, and shows you what goes on-chain. Then it asks once and sends.
+Before publishing, `attest` exports a minimal copy of your key, leaves out every name that contains an email (pass `--include-email` to keep them) and any SSH-only subkey, signs `I control the Ethereum address: 0x…` with your key (a detached signature over exactly that line), verifies it against the export exactly the way thurin.id will, checks the size limits and that no active claim already exists, and shows you what goes on-chain: the key and the signature as raw bytes, the same thing thurin.id publishes. Then it asks once and sends.
 
 ## Change your claim
 
 ```bash
 thurin update-key          # after adding a proof notation to your key: same fingerprint, new notations, no new signature
-thurin reattest            # revoke the current claim and publish a new key in one transaction
+thurin reattest            # revoke the current claim and publish a new key in one transaction; its records move with it
+thurin reattest --drop-records               # …or leave the records with the old claim
 thurin revoke              # mark the claim inactive (it stays in chain history)
+thurin revoke --reason compromised           # or retired, superseded, other
 ```
 
 Adding a proof to a key is one gpg line; see the [GnuPG guide](https://docs.thurin.id/#/guides/gnupg).
@@ -177,7 +179,7 @@ Keystores are the same format `cast`, geth, and every wallet import. `--password
 
 ## Networks
 
-`--network mainnet|sepolia|local` (local = a running anvil), `--rpc <url>` for your own node. Defaults live in `~/.config/thurin/config.json`. The registry is at `0x9302E02e2869e129aC8516fE5eFFd51EA3082c09` on every network.
+`--network mainnet|sepolia|local` (local = a running anvil), `--rpc <url>` for your own node. Defaults live in `~/.config/thurin/config.json`. The registry (PGPRegistry v3) is at `0x4f2d70799cAAD651C7c564426AA74A842c1331B6` on every network.
 
 ## What's next
 

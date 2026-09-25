@@ -3,7 +3,7 @@
  * for a wallet the CLI can't drive (a Ledger, a phone). Everything rides in the
  * URL fragment, which browsers never send to a server, so the payload goes from
  * this terminal to that browser and nowhere else. Same format as
- * thurin-id/src/handoff.js; bump `v` when it changes.
+ * thurin-id/src/handoff.js (format 2); bump `v` when it changes.
  *
  * With `authorization` the owner has also signed the write as EIP-712 typed data
  * (`--authorize`), so anyone can publish it through the registry's `…For` calls and
@@ -13,7 +13,8 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { stringToHex, type Address, type Hex } from 'viem'
 import {
-  fingerprintToBytes, attestTypedData, reattestTypedData, updateKeyTypedData, revokeTypedData, setRecordTypedData, recordKind,
+  fingerprintToBytes, attestTypedData, reattestTypedData, updateKeyTypedData, revokeTypedData, setRecordTypedData, REVOKE_REASONS,
+  type RevokeReason,
 } from '@thurinlabs/identity-kit/core'
 
 export type HandoffOp = 'attest' | 'reattest' | 'update-key' | 'revoke' | 'set-record'
@@ -28,19 +29,23 @@ export interface Authorization {
 }
 
 export interface Handoff {
-  v: 1
+  v: 2
   op: HandoffOp
   network: string
   /** The address the claim is for. Lowercase. */
   owner: string
   fingerprint: string
-  /** Armored public key, exactly what goes on-chain. Absent for revoke. */
+  /** The key exactly as it goes on-chain, 0x hex. Absent for revoke and set-record. */
   key?: string
-  /** Clearsigned statement; absent for update-key and revoke, which need no new signature. */
+  /** The signature as 0x hex, or a whole clearsigned message as text; attest and reattest only. */
   signature?: string
+  /** reattest: move the replaced claim's records to the new one (default true). */
+  keepRecords?: boolean
+  /** revoke: '', 'compromised', 'retired', 'superseded', or 'other'. */
+  reason?: RevokeReason
   /** Claim index to replace (reattest), update (update-key), revoke, or set a record on. */
   index?: number
-  /** set-record: the record kind name (thurin.pointer) and UTF-8 value ('' clears). */
+  /** set-record: the record name as submitted (e.g. pointer or thurin.pointer) and text value ('' clears). */
   kind?: string
   value?: string
   includeEmail: boolean
@@ -57,12 +62,15 @@ export function encodeHandoff(h: Handoff): string {
 export function decodeHandoff(encoded: string): Handoff {
   let h: any
   try { h = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) } catch { throw new Error('Not a Thurin hand-off') }
-  if (h?.v !== 1 || !OPS.includes(h.op)) throw new Error('Not a Thurin hand-off')
+  if (h?.v === 1) throw new Error('This is a format 1 hand-off (registry v2); make a new one')
+  if (h?.v !== 2 || !OPS.includes(h.op)) throw new Error('Not a Thurin hand-off')
   if (!/^0x[0-9a-f]{40}$/.test(h.owner || '')) throw new Error('Hand-off has no valid owner')
   if (h.op !== 'attest' && !Number.isInteger(h.index)) throw new Error('Hand-off names no claim index')
-  if (h.op !== 'revoke' && h.op !== 'set-record' && typeof h.key !== 'string') throw new Error('Hand-off carries no key')
+  if (h.op !== 'revoke' && h.op !== 'set-record' && !isHex(h.key)) throw new Error('Hand-off carries no key')
+  if (h.reason != null && !(REVOKE_REASONS as readonly string[]).includes(h.reason)) throw new Error(`Unknown revoke reason "${h.reason}"`)
+  if (h.keepRecords != null && typeof h.keepRecords !== 'boolean') throw new Error('Hand-off has an invalid keepRecords')
   if (h.op === 'set-record' && (typeof h.kind !== 'string' || typeof h.value !== 'string')) throw new Error('Hand-off names no record')
-  if ((h.op === 'attest' || h.op === 'reattest') && typeof h.signature !== 'string') throw new Error('Hand-off carries no signed statement')
+  if ((h.op === 'attest' || h.op === 'reattest') && typeof h.signature !== 'string') throw new Error('Hand-off carries no signature')
   if (h.authorization != null) {
     const a = h.authorization
     if (!Number.isInteger(a.nonce) || !Number.isInteger(a.deadline) || !/^0x[0-9a-f]{130}$/i.test(a.signature || '')) throw new Error('Hand-off has a malformed authorization')
@@ -92,24 +100,29 @@ export function typedDataFor(h: Handoff, chainId: number, registry: Address) {
   if (!h.authorization) throw new Error('No authorization to build typed data for')
   const common = { owner: h.owner as Address, nonce: BigInt(h.authorization.nonce), deadline: BigInt(h.authorization.deadline) }
   switch (h.op) {
-    case 'attest': return attestTypedData(chainId, registry, { ...common, fingerprint: h.fingerprint, pgpSignature: h.signature!, pgpPublicKey: h.key! })
-    case 'reattest': return reattestTypedData(chainId, registry, { ...common, revokeIndex: BigInt(h.index!), fingerprint: h.fingerprint, pgpSignature: h.signature!, pgpPublicKey: h.key! })
-    case 'update-key': return updateKeyTypedData(chainId, registry, { ...common, index: BigInt(h.index!), pgpPublicKey: h.key! })
-    case 'revoke': return revokeTypedData(chainId, registry, { ...common, index: BigInt(h.index!) })
-    case 'set-record': return setRecordTypedData(chainId, registry, { ...common, index: BigInt(h.index!), kind: recordKind(h.kind!), value: h.value ? stringToHex(h.value) : '0x' })
+    case 'attest': return attestTypedData(chainId, registry, { ...common, fingerprint: h.fingerprint, signature: h.signature!, key: h.key! })
+    case 'reattest': return reattestTypedData(chainId, registry, { ...common, revokeIndex: BigInt(h.index!), fingerprint: h.fingerprint, signature: h.signature!, key: h.key!, keepRecords: h.keepRecords !== false })
+    case 'update-key': return updateKeyTypedData(chainId, registry, { ...common, index: BigInt(h.index!), key: h.key! })
+    case 'revoke': return revokeTypedData(chainId, registry, { ...common, index: BigInt(h.index!), reason: h.reason ?? '' })
+    case 'set-record': return setRecordTypedData(chainId, registry, { ...common, index: BigInt(h.index!), kind: h.kind!, value: h.value ?? '' })
   }
 }
+
+function isHex(v: unknown): v is Hex { return typeof v === 'string' && /^0x([0-9a-fA-F]{2})+$/.test(v) }
+
+/** A payload argument: 0x hex is raw bytes; a clearsigned message goes as its text's bytes. */
+export function payloadArg(v: string): Hex { return isHex(v) ? v : stringToHex(v) }
 
 /** Arguments for the matching `…For` call. */
 export function forArgsOf(h: Handoff): unknown[] {
   const a = h.authorization!
   const d = BigInt(a.deadline)
   switch (h.op) {
-    case 'attest': return [h.owner, fingerprintToBytes(h.fingerprint), stringToHex(h.signature!), stringToHex(h.key!), d, a.signature]
-    case 'reattest': return [h.owner, BigInt(h.index!), fingerprintToBytes(h.fingerprint), stringToHex(h.signature!), stringToHex(h.key!), d, a.signature]
-    case 'update-key': return [h.owner, BigInt(h.index!), stringToHex(h.key!), d, a.signature]
-    case 'revoke': return [h.owner, BigInt(h.index!), d, a.signature]
-    case 'set-record': return [h.owner, BigInt(h.index!), recordKind(h.kind!), h.value ? stringToHex(h.value) : '0x', d, a.signature]
+    case 'attest': return [h.owner, fingerprintToBytes(h.fingerprint), payloadArg(h.signature!), payloadArg(h.key!), d, a.signature]
+    case 'reattest': return [h.owner, BigInt(h.index!), fingerprintToBytes(h.fingerprint), payloadArg(h.signature!), payloadArg(h.key!), h.keepRecords !== false, d, a.signature]
+    case 'update-key': return [h.owner, BigInt(h.index!), payloadArg(h.key!), d, a.signature]
+    case 'revoke': return [h.owner, BigInt(h.index!), h.reason ?? '', d, a.signature]
+    case 'set-record': return [h.owner, BigInt(h.index!), h.kind!, h.value ?? '', d, a.signature]
   }
 }
 
