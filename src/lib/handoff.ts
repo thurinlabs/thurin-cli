@@ -7,7 +7,7 @@
  *
  * With `authorization` the owner has also signed the write as EIP-712 typed data
  * (`--authorize`), so anyone can publish it through the registry's `…For` calls and
- * pay the fee: a friend, `thurin submit`, or a relayer. The typed data is rebuilt from
+ * pay the fee: a friend, `thurin submit`, or a relay. The typed data is rebuilt from
  * the other fields rather than carried, so what is shown is what was signed.
  */
 import { readFileSync, existsSync } from 'node:fs'
@@ -147,20 +147,23 @@ export function forArgsOf(h: Handoff): unknown[] {
 }
 
 /** "1h", "2d", "1w", or unix seconds → unix seconds from now. */
-export function parseDeadline(spec: string | undefined, fallback = '7d'): number {
+/** A relative deadline counts from `now`: the chain's time, since that's what the contract checks against. */
+export function parseDeadline(spec: string | undefined, fallback = '7d', now = Math.floor(Date.now() / 1000)): number {
   const s = (spec || fallback).trim()
   if (/^\d{9,}$/.test(s)) return Number(s)
   const m = s.match(/^(\d+)\s*([mhdw])$/i)
   if (!m) throw new Error(`Bad deadline "${s}": use 30m, 12h, 3d, 1w, or a unix timestamp`)
   const mult = { m: 60, h: 3600, d: 86400, w: 604800 }[m[2].toLowerCase() as 'm' | 'h' | 'd' | 'w']
-  return Math.floor(Date.now() / 1000) + Number(m[1]) * mult
+  return now + Number(m[1]) * mult
 }
 
-export function describeDeadline(unix: number): string {
-  const left = unix - Math.floor(Date.now() / 1000)
+/** `now` is the chain's time when checking someone's permission; this machine's clock can be off. */
+export function describeDeadline(unix: number, now = Math.floor(Date.now() / 1000)): string {
+  const left = unix - now
   const when = new Date(unix * 1000).toISOString().replace('T', ' ').slice(0, 16) + ' UTC'
   if (left <= 0) return `expired ${when}`
-  const n = left < 3600 ? Math.max(1, Math.floor(left / 60)) : left < 86400 ? Math.floor(left / 3600) : Math.floor(left / 86400)
-  const span = `${n} ${left < 3600 ? 'minute' : left < 86400 ? 'hour' : 'day'}${n === 1 ? '' : 's'}`
+  const m = Math.max(1, Math.round(left / 60)), h = Math.round(left / 3600)
+  const [n, unit] = m < 60 ? [m, 'minute'] : h < 24 ? [h, 'hour'] : [Math.round(left / 86400), 'day']
+  const span = `${n} ${unit}${n === 1 ? '' : 's'}`
   return `${span} (${when})`
 }

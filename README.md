@@ -113,14 +113,14 @@ gpg --keyserver hkp://127.0.0.1:11371 --recv-keys 08B9374FDFBEC67EFFA24E669D3D86
 
 It answers gpg from the registry: no database, no uploads, no email search. Put it in `~/.gnupg/dirmngr.conf` and `--refresh-keys` picks up revocations. A fetch by full fingerprint checks itself, so a keyserver can withhold a key but never swap one. Thurin runs one at `hkps://keys.thurin.id`.
 
-## Run a relayer
+## Run a relay
 
 ```bash
 thurin wallet create hot                     # fund it with pocket money
 thurin relay --account hot --budget 0.01     # ETH per day
 ```
 
-It takes permissions over HTTP, runs the same checks as `submit`, and pays from the hot keystore: within the daily budget, one free `attest` per address (`--free-attests`), 10 requests an hour per caller (`--per-hour`), and 6M gas per transaction (`--max-gas`). It's the one command that spends without asking. Put a TLS proxy in front; it listens on localhost. People use it with `--relayer <url>`.
+It takes permissions over HTTP, runs the same checks as `submit`, and pays from the hot keystore: within the daily budget, one free `attest` per address (`--free-attests`), 10 requests an hour per caller (`--per-hour`), and 6M gas per transaction (`--max-gas`). It's the one command that spends without asking. Put a TLS proxy in front; it listens on localhost. People use it with `--relay <url>`.
 
 ## Networks
 

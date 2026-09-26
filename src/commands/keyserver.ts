@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { createRequire } from 'node:module'
 import type { Address } from 'viem'
 import { sameFingerprint, keyIdOf } from '@thurinlabs/identity-kit/core'
-import { chainCtx, claimsOf, resolveOwners, detectLookup, ensNameOf, type ChainCtx, type Claim } from '../lib/chain.js'
+import { chainCtx, claimsOf, resolveOwners, detectLookup, ensNameOf, claimMatches, type ChainCtx, type Claim } from '../lib/chain.js'
 import { CliError, EXIT, ok, bold, dim, label } from '../lib/output.js'
 import { listen } from '../lib/listen.js'
 
@@ -79,7 +79,7 @@ export async function keyserver(_args: string[], opts: Record<string, any>) {
       // The primary name if the address set one; else the name that was searched, which resolved here.
       const searchedName = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(search) ? search.toLowerCase() : null
       const names = new Map<string, string | null>()
-      for (const e of entries) if (!names.has(e.owner)) names.set(e.owner, (await ensNameOf(ctx, e.owner)) ?? searchedName)
+      for (const e of entries) for (const o of e.owners) if (!names.has(o)) names.set(o, (await ensNameOf(ctx, o)) ?? searchedName)
       return html(res, 200, frontDoor(req, ctx, search, undefined, indexListing(entries, names)))
     }
     // Machine-readable index (options=mr), the form dirmngr parses.
@@ -101,7 +101,7 @@ export async function keyserver(_args: string[], opts: Record<string, any>) {
   await new Promise<void>(resolve => { for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => { server.close(); resolve() }) })
 }
 
-interface Entry { fingerprint: string; armored: string; algo: number; bits: number; created: number; expires: number | ''; revoked: boolean; uids: string[]; owner: Address }
+interface Entry { fingerprint: string; armored: string; algo: number; bits: number; created: number; expires: number | ''; revoked: boolean; uids: string[]; owners: Address[] }
 
 /**
  * The search terms served: fingerprint, key ID, address, ENS. Email and free text find nothing:
@@ -135,8 +135,11 @@ export async function find(ctx: ChainCtx, search: string): Promise<Entry[]> {
     // The active, verified claim per key only: `--refresh-keys` on a revoked key gets 404, which is the point.
     const current = claims.filter(c => !c.revokedAt && c.verification?.verified && c.pgpPublicKey)
     for (const c of current) {
-      if (lookup.type === 'fingerprint' && !sameFingerprint(c.fingerprint, lookup.value)) continue
-      out.push(toEntry(c, owner))
+      if (!claimMatches(c, lookup)) continue
+      // One entry per key; every owner that claims it is listed on it.
+      const seen = out.find(e => sameFingerprint(e.fingerprint, c.fingerprint))
+      if (seen) seen.owners.push(owner)
+      else out.push(toEntry(c, owner))
     }
   }
   return out
@@ -144,14 +147,24 @@ export async function find(ctx: ChainCtx, search: string): Promise<Entry[]> {
 
 function toEntry(c: Claim, owner: Address): Entry {
   const k = c.keyInfo
-  const algoNum: Record<string, number> = { RSA: 1, DSA: 17, ElGamal: 16, ECDSA: 19, Ed25519: 22, EdDSA: 22, ECDH: 18 }
+  const { algo, bits } = hkpAlgo(k?.algorithm)
   return {
-    fingerprint: c.fingerprint, armored: c.pgpPublicKey!, owner,
-    algo: algoNum[k?.algorithm ?? ''] ?? 0, bits: (k as any)?.bits ?? 0,
+    fingerprint: c.fingerprint, armored: c.pgpPublicKey!, owners: [owner], algo, bits,
     created: k?.created ? Math.floor(Date.parse(k.created) / 1000) : c.createdAt,
     expires: k?.expires ? Math.floor(Date.parse(k.expires) / 1000) : '',
     revoked: false, uids: k?.userIDs ?? [],
   }
+}
+
+/** The kit's algorithm name ("RSA 3072", "NIST P-256", "Ed25519") as the OpenPGP number HKP listings use. */
+export function hkpAlgo(name = ''): { algo: number; bits: number } {
+  const bits = Number(name.match(/\d+$/)?.[0] ?? 0)
+  if (name.startsWith('RSA')) return { algo: 1, bits }
+  if (name.startsWith('DSA')) return { algo: 17, bits }
+  if (name.startsWith('ElGamal')) return { algo: 16, bits }
+  if (name === 'Ed25519' || name === 'Ed448') return { algo: 22, bits: 0 }
+  if (/^(NIST|brainpool|secp)/.test(name)) return { algo: 19, bits: 0 }
+  return { algo: 0, bits: 0 }
 }
 
 function text(res: ServerResponse, status: number, body: string) {
@@ -182,9 +195,11 @@ export function indexListing(entries: Entry[], names: Map<string, string | null>
     L.push(`pub   ${algo}/<a href="/pks/lookup?op=get&amp;search=0x${e.fingerprint}">${keyId}</a> ${day(e.created)}${exp}`)
     L.push(`      Fingerprint=${spaced(e.fingerprint)}`)
     for (const u of e.uids) L.push(`uid   ${esc(u)}`)
-    const name = names.get(e.owner)
-    const who = name ? `${esc(name)} <span class="dim">${e.owner}</span>` : e.owner
-    L.push(`      claimed by <a href="https://thurin.id/eth/${e.owner}" target="_blank" rel="noopener noreferrer">${who}</a>`)
+    for (const o of e.owners) {
+      const name = names.get(o)
+      const who = name ? `${esc(name)} <span class="dim">${o}</span>` : o
+      L.push(`      claimed by <a href="https://thurin.id/eth/${o}" target="_blank" rel="noopener noreferrer">${who}</a>`)
+    }
     L.push('')
   }
   return L.join('\n')

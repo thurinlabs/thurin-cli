@@ -4,7 +4,7 @@ import { Limits, LimitError } from '../src/lib/limits.js'
 
 const cfg = { budgetEth: 0.01, perCallerPerHour: 2, attestsPerOwner: 1, maxGas: 500_000n }
 
-describe('relayer limits', () => {
+describe('relay limits', () => {
   it('lets a normal request through and records it', () => {
     const l = new Limits(cfg)
     l.check('1.2.3.4', '0xaa', 'attest', 200_000n, 0.001)

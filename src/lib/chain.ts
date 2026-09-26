@@ -1,7 +1,7 @@
 import { createPublicClient, http, type Address, type Hex, type PublicClient, type Chain } from 'viem'
 import { normalize } from 'viem/ens'
 import {
-  REGISTRY_ABI, getRegistry, chainFor, isNetworkName, parsePgpKey, readClaims, findOwners,
+  REGISTRY_ABI, getRegistry, chainFor, isNetworkName, parsePgpKey, readClaims, findOwners, sameFingerprint, keyIdOf, contractErrorText,
   type NetworkName, type PGPKeyInfo, type Attestation,
 } from '@thurinlabs/identity-kit/core'
 import { readConfig } from './config.js'
@@ -47,11 +47,24 @@ export async function readRegistry<T>(ctx: ChainCtx, functionName: string, args:
   } catch (err) { throw readError(ctx, err) }
 }
 
+/** A would-be write that failed: the registry's own reason (exit 1) when it refused, else a chain error (exit 3). */
+export function refusal(what: string, err: any): CliError {
+  const text = contractErrorText(err)
+  return text ? new CliError(`${what}: ${text}`, EXIT.FAILED) : new CliError(`${what}: ${err.shortMessage || err.message}`, EXIT.CHAIN)
+}
+
 function readError(ctx: ChainCtx, err: any): CliError {
   return new CliError(`Couldn't read the registry on ${ctx.network} via ${rpcHost(ctx.rpcUrl)} (${err.shortMessage || err.message}). Try again, or --rpc <url>`, EXIT.CHAIN)
 }
 
 export type Lookup = { type: 'address' | 'ens' | 'fingerprint' | 'keyId'; value: string }
+
+/** Whether a claim is for the key a lookup names; address and ENS lookups name no key, so every claim is. */
+export function claimMatches(c: { fingerprint: string }, lookup: Lookup): boolean {
+  if (lookup.type === 'fingerprint') return sameFingerprint(c.fingerprint, lookup.value)
+  if (lookup.type === 'keyId') return keyIdOf(c.fingerprint).slice(2) === lookup.value.replace(/^0x/i, '').toLowerCase()
+  return true
+}
 
 export function detectLookup(value: string): Lookup {
   const v = value.trim()

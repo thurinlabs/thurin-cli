@@ -90,3 +90,13 @@ describe('authorization', () => {
     expect(() => parseDeadline('soon')).toThrow(/Bad deadline/)
   })
 })
+
+describe('describeDeadline', () => {
+  it('a fresh 7-day permission reads 7 days, and expiry follows the time given', async () => {
+    const { describeDeadline } = await import('../src/lib/handoff.js')
+    const now = 1_800_000_000
+    expect(describeDeadline(now + 7 * 86400 - 5, now)).toMatch(/^7 days /)
+    expect(describeDeadline(now + 3600 - 1, now)).toMatch(/^1 hour /)
+    expect(describeDeadline(now - 1, now)).toMatch(/^expired /)
+  })
+})

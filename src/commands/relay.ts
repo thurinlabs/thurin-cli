@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { createHash, randomBytes } from 'node:crypto'
 import { createWalletClient, http, formatEther, type Address } from 'viem'
 import { REGISTRY_ABI } from '@thurinlabs/identity-kit/core'
-import { chainCtx } from '../lib/chain.js'
+import { chainCtx, refusal } from '../lib/chain.js'
 import { loadAccount } from '../lib/keystore.js'
 import { prompt } from '../lib/prompt.js'
 import { decodeHandoff, encodeHandoff, forArgsOf, FOR_FN, type Handoff } from '../lib/handoff.js'
@@ -47,7 +47,7 @@ export async function relay(_args: string[], opts: Record<string, any>) {
     res.setHeader('access-control-allow-headers', 'content-type')
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }
     if (req.method === 'GET') {
-      return reply(res, 200, { ok: true, network: ctx.network, payer: account.address, budgetEth: limits.cfg.budgetEth, spentTodayEth: limits.spentLast24h(), freeAttestsPerOwner: limits.cfg.attestsPerOwner })
+      return reply(res, 200, { ok: true, network: ctx.network, chainId: ctx.client.chain?.id, payer: account.address, budgetEth: limits.cfg.budgetEth, spentTodayEth: limits.spentLast24h(), freeAttestsPerOwner: limits.cfg.attestsPerOwner })
     }
     if (req.method !== 'POST') return reply(res, 405, { error: 'POST a signed permission' })
     const caller = callerKey(req)
@@ -63,7 +63,7 @@ export async function relay(_args: string[], opts: Record<string, any>) {
         const { owner, proofs } = await checkAuthorization(ctx, h)
         const fn = FOR_FN[h.op], args = forArgsOf(h)
         const gas = await ctx.client.estimateContractGas({ address: ctx.registry, abi: REGISTRY_ABI, functionName: fn, args, account } as any)
-          .catch((e: any) => { throw new CliError(`The registry would refuse this: ${e.shortMessage || e.message}`, EXIT.CHAIN) })
+          .catch((e: any) => { throw refusal('The registry would refuse this', e) })
         const price = await ctx.client.getGasPrice()
         const estEth = Number(gas * price * 12n / 10n) / 1e18   // 20 % headroom for a price move
         limits.check(caller, owner, h.op, gas, estEth)

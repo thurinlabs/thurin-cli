@@ -1,6 +1,6 @@
-import { sameFingerprint, identifyProof, verifyProof, displayUrl, claimCheckText, expiresSoon, claimFates, keyIdOf, CLAIM_LIMIT, type ClaimFate, type PGPVerification } from '@thurinlabs/identity-kit/core'
+import { identifyProof, verifyProof, displayUrl, claimCheckText, expiresSoon, claimFates, CLAIM_LIMIT, type ClaimFate, type PGPVerification } from '@thurinlabs/identity-kit/core'
 import { listKeystores } from '../lib/keystore.js'
-import { chainCtx, claimsOf, detectLookup, resolveOwners, ensNameOf, type Claim } from '../lib/chain.js'
+import { chainCtx, claimsOf, detectLookup, resolveOwners, ensNameOf, claimMatches, type Claim } from '../lib/chain.js'
 import { out, ok, bad, dim, bold, label, CliError, EXIT } from '../lib/output.js'
 import { ensHintOf, renderHint } from './ens.js'
 
@@ -15,11 +15,10 @@ export async function status(args: string[], opts: Record<string, any>) {
   for (const owner of owners) {
     const claims = await claimsOf(ctx, owner)
     const name = ensName ?? await ensNameOf(ctx, owner)
-    // The claim to show: when the query names a key, that key's claim; else the newest verified one.
-    const active = claims.filter(c => !c.revokedAt && c.verification?.verified)
-    const current = (lookup.type === 'fingerprint' ? active.find(c => sameFingerprint(c.fingerprint, lookup.value))
-      : lookup.type === 'keyId' ? active.find(c => keyIdOf(c.fingerprint).slice(2) === lookup.value.toLowerCase())
-      : null) ?? active[active.length - 1] ?? null
+    // When the query names a key, only that key's claims: another key's verified claim says nothing about it.
+    const named = claims.filter(c => claimMatches(c, lookup))
+    const current = named.filter(c => !c.revokedAt && c.verification?.verified).at(-1) ?? null
+    const unverified = current ? null : named.filter(c => !c.revokedAt).at(-1) ?? null
     // --no-proofs: ask nothing but the Ethereum node (each proof platform would see the lookup).
     const offline = !!opts.noProofs
     let proofs: { provider: string; label: string; display: string; url: string; verified: boolean | null; reason?: string }[] = []
@@ -34,13 +33,14 @@ export async function status(args: string[], opts: Record<string, any>) {
     // The name's id.thurin record: a pointer ENS viewers can show; the claim above is the proof.
     const ensRecord = name && ctx.network === 'mainnet' ? await ensHintOf(ctx, name, claims).catch(() => null) : null
     const fates = claimFates(claims)
-    identities.push({ address: owner, ensName: name, network: ctx.network, claims, current, proofs, ensRecord, fates, mine: ownKeystore(owner) })
+    identities.push({ address: owner, ensName: name, network: ctx.network, claims, current, unverified, proofs, ensRecord, fates, mine: ownKeystore(owner) })
   }
 
   out({ query, lookup, identities: identities.map(({ fates, mine, ...i }) => ({
     ...i,
     claims: i.claims.map((c: Claim) => ({ ...stripKey(c), fate: fates.get(c.index) ?? null })),
     current: i.current ? stripKey(i.current) : null,
+    unverified: i.unverified ? stripKey(i.unverified) : null,
   })) }, () => identities.map(render).join('\n\n'))
   const anyVerified = identities.some(i => i.current)
   if (!anyVerified) process.exitCode = EXIT.FAILED
@@ -93,7 +93,7 @@ function render(i: any): string {
     for (const u of i.current.keyInfo?.userIDs ?? []) L.push(`${label('name')}${u}`)
     L.push(`${label('key')}${i.current.keyInfo?.algorithm ?? '?'} · ${i.current.keyInfo?.created ? `created ${i.current.keyInfo.created.slice(0, 10)} · ` : ''}claimed ${new Date(i.current.createdAt * 1000).toISOString().slice(0, 10)}${i.current.keyInfo?.expires ? ` · expires ${i.current.keyInfo.expires.slice(0, 10)}` : ''}`)
   } else {
-    const c = i.claims.find((c: Claim) => !c.revokedAt)
+    const c = i.unverified
     L.push(c ? `${label('fingerprint')}${c.fingerprint}  ${checkLine(c.verification, i.mine)}` : `${label('current')}${bad('✗ no active claim')}`)
   }
   if (i.proofs.length) { L.push(label('proofs')); for (const p of i.proofs) L.push(p.verified === null ? `  ${dim('○')} ${p.label.padEnd(10)} ${p.display}${dim('  not checked')}` : `  ${p.verified ? ok('✓') : bad('✗')} ${p.label.padEnd(10)} ${p.display}${p.verified ? '' : dim('  ' + (p.reason || ''))}`) }

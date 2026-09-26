@@ -19,11 +19,11 @@ describe('keyserver front door', () => {
   const entry = {
     fingerprint: '6E0053911942A889426C1866E34D9266098F7FE7', armored: '', algo: 22, bits: 0,
     created: Date.parse('2026-01-23') / 1000, expires: '' as const, revoked: false,
-    uids: ['Ben Woodall (Ben Thurin Key) <ben@thurin.id>'], owner: '0xd32e18C735E89fA7616dF3CEAEb5E33f3280e9fe' as const,
+    uids: ['Ben Woodall (Ben Thurin Key) <ben@thurin.id>'], owners: ['0xd32e18C735E89fA7616dF3CEAEb5E33f3280e9fe' as const],
   }
   it('prints the classic index with the claim line', async () => {
     const { indexListing } = await import('../src/commands/keyserver.js')
-    const out = indexListing([entry], new Map([[entry.owner, 'ben.thurinlabs.eth']]))
+    const out = indexListing([entry], new Map([[entry.owners[0], 'ben.thurinlabs.eth']]))
     expect(out).toContain('pub   ed25519/<a href="/pks/lookup?op=get&amp;search=0x6E0053911942A889426C1866E34D9266098F7FE7">E34D9266098F7FE7</a> 2026-01-23')
     expect(out).toContain('Fingerprint=6E00 5391 1942 A889 426C  1866 E34D 9266 098F 7FE7')
     expect(out).toContain('uid   Ben Woodall (Ben Thurin Key) &lt;ben@thurin.id&gt;')
@@ -77,6 +77,47 @@ describe('keyserver lookup', () => {
     const { find } = await import('../src/commands/keyserver.js')
     const hits = await find({} as any, '0x08B9374FDFBEC67EFFA24E669D3D86E35361EF7B')
     expect(hits.map(h => h.fingerprint)).toEqual(['08b9374fdfbec67effa24e669d3d86e35361ef7b'])
+    vi.doUnmock('../src/lib/chain.js')
+  })
+
+  it('a key ID search returns only the keys with that ID, not every key of their owners', async () => {
+    vi.resetModules()
+    const owner = '0x539C7e1E454296Dc150B95a0acCC05bCa3b33538'
+    const claim = (fingerprint: string) => ({ fingerprint, revokedAt: null, verification: { verified: true }, pgpPublicKey: 'armored', keyInfo: null, createdAt: 0 })
+    vi.doMock('../src/lib/chain.js', async (orig) => ({
+      ...(await orig<any>()),
+      resolveOwners: async () => ({ owners: [owner] }),
+      claimsOf: async () => [claim('08B9374FDFBEC67EFFA24E669D3D86E35361EF7B'), claim('AA'.repeat(20))],
+    }))
+    const { find } = await import('../src/commands/keyserver.js')
+    const hits = await find({} as any, '0x9D3D86E35361EF7B')
+    expect(hits.map(h => h.fingerprint)).toEqual(['08B9374FDFBEC67EFFA24E669D3D86E35361EF7B'])
+    vi.doUnmock('../src/lib/chain.js')
+  })
+})
+
+describe('keyserver listing details', () => {
+  it('maps the kit algorithm names to HKP numbers', async () => {
+    const { hkpAlgo } = await import('../src/commands/keyserver.js')
+    expect(hkpAlgo('RSA 3072')).toEqual({ algo: 1, bits: 3072 })
+    expect(hkpAlgo('Ed25519')).toEqual({ algo: 22, bits: 0 })
+    expect(hkpAlgo('NIST P-256')).toEqual({ algo: 19, bits: 0 })
+    expect(hkpAlgo('DSA 2048')).toEqual({ algo: 17, bits: 2048 })
+  })
+
+  it('lists a key claimed by two owners once, with both owners', async () => {
+    vi.resetModules()
+    const a = '0x539C7e1E454296Dc150B95a0acCC05bCa3b33538', b = '0xd32e18C735E89fA7616dF3CEAEb5E33f3280e9fe'
+    const fp = '08B9374FDFBEC67EFFA24E669D3D86E35361EF7B'
+    vi.doMock('../src/lib/chain.js', async (orig) => ({
+      ...(await orig<any>()),
+      resolveOwners: async () => ({ owners: [a, b] }),
+      claimsOf: async () => [{ fingerprint: fp, revokedAt: null, verification: { verified: true }, pgpPublicKey: 'armored', keyInfo: null, createdAt: 0 }],
+    }))
+    const { find } = await import('../src/commands/keyserver.js')
+    const hits = await find({} as any, '0x' + fp)
+    expect(hits).toHaveLength(1)
+    expect(hits[0].owners).toEqual([a, b])
     vi.doUnmock('../src/lib/chain.js')
   })
 })

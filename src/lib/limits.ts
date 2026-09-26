@@ -1,10 +1,10 @@
 /**
- * What a relayer refuses before it spends: a daily gas budget, one free `attest` per
+ * What a relay refuses before it spends: a daily gas budget, one free `attest` per
  * address, and a per-caller rate. All in memory: a restart forgets, which errs toward
  * generosity and needs no database. The chain is the record of what was actually paid.
  */
 export interface LimitsConfig {
-  /** ETH the relayer may spend per rolling 24 h. */
+  /** ETH the relay may spend per rolling 24 h. */
   budgetEth: number
   /** Requests per caller per hour (the relay keys callers by a salted hash of the IP). */
   perCallerPerHour: number
@@ -41,8 +41,8 @@ export class Limits {
     const cutoff = this.now() - 3_600_000
     const recent = (this.callers.get(caller) || []).filter(t => t > cutoff)
     if (recent.length >= this.cfg.perCallerPerHour) throw new LimitError('Too many requests from you; try again in an hour', 429)
-    if (op === 'attest' && (this.attests.get(owner.toLowerCase()) || 0) >= this.cfg.attestsPerOwner) throw new LimitError(`This relay pays for ${this.cfg.attestsPerOwner} claim per address. Publish it yourself: thurin submit <file>`, 403)
-    if (this.spentLast24h() + estEth > this.cfg.budgetEth) throw new LimitError('The relay has spent its budget for today. Try again tomorrow, or publish it yourself: thurin submit <file>', 503)
+    if (op === 'attest' && (this.attests.get(owner.toLowerCase()) || 0) >= this.cfg.attestsPerOwner) throw new LimitError(`This relay pays for ${this.cfg.attestsPerOwner} claim per address, and this address has had it. Publish this one another way: a link for someone with ETH, or your own wallet`, 403)
+    if (this.spentLast24h() + estEth > this.cfg.budgetEth) throw new LimitError('The relay has spent its budget for today. Try again tomorrow, or publish it another way: a link for someone with ETH, or your own wallet', 503)
   }
 
   /** Record a request that was sent (whatever it ends up costing). */

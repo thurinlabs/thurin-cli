@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import { status } from './commands/status.js'
 import { key } from './commands/key.js'
 import { wallet } from './commands/wallet.js'
-import { attest, updateKey, reattest, revoke, submit, finishAuthorization } from './commands/attest.js'
+import { attest, updateKey, reattest, revoke, cancel, submit, finishAuthorization } from './commands/attest.js'
 import { relay } from './commands/relay.js'
 import { keyserver } from './commands/keyserver.js'
 import { record } from './commands/record.js'
@@ -103,13 +103,17 @@ More: thurin help no-eth   (your ETH is elsewhere, or you have none)
 
   --authorize [--deadline 7d] [--out f.json]
       No ETH here: sign a free permission that anyone can publish and pay for.
-      --relayer <url>     post it to a relay that pays
-      --no-relayer        make a link instead
+      --relay <url>       post it to a relay that pays
+      --no-relay          make a link instead
       --signer <cmd>      sign with a program, e.g. a card (needs --owner)
       --sign-out f.json   air gap: write what needs signing, and stop (needs --owner)
 
   thurin authorize finish f.json --signature 0x… | --signature-file f
       Check an air-gapped signature and hand the permission out.
+
+  thurin cancel
+      Stop every permission you've signed that hasn't been used yet.
+      Your own transaction, so it needs ETH.
 
   thurin submit <link|file>
       Publish someone's permission from this keystore.
@@ -176,7 +180,7 @@ ${dim(`Contract ${REGISTRY_ADDRESS} on Ethereum mainnet and Sepolia`)}
 }
 const TOPIC_OF: Record<string, string> = {
   attest: 'claims', reattest: 'claims', 'update-key': 'claims', revoke: 'claims', claims: 'claims',
-  'no-eth': 'no-eth', submit: 'no-eth', authorize: 'no-eth',
+  'no-eth': 'no-eth', submit: 'no-eth', authorize: 'no-eth', cancel: 'no-eth',
   status: 'status', key: 'key', wallet: 'wallet', record: 'record', ens: 'ens', keyserver: 'keyserver', relay: 'relay', options: 'options',
 }
 function topicHelp(name: string | undefined): string {
@@ -199,11 +203,11 @@ async function main() {
       authorize: { type: 'boolean' }, deadline: { type: 'string' }, out: { type: 'string' },
       'drop-records': { type: 'boolean' }, reason: { type: 'string' }, compromised: { type: 'boolean' },
       signer: { type: 'string' }, 'sign-out': { type: 'string' }, signature: { type: 'string' }, 'signature-file': { type: 'string' },
-      relayer: { type: 'string' }, 'no-relayer': { type: 'boolean' }, 'no-proofs': { type: 'boolean' },
+      relay: { type: 'string' }, 'no-relay': { type: 'boolean' }, 'no-proofs': { type: 'boolean' },
       budget: { type: 'string' }, port: { type: 'string' }, host: { type: 'string' }, 'cache-seconds': { type: 'string' }, file: { type: 'string' }, index: { type: 'string' }, url: { type: 'string' }, 'per-hour': { type: 'string' }, 'free-attests': { type: 'string' }, 'max-gas': { type: 'string' },
     },
   })
-  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'], noRelayer: values['no-relayer'], noProofs: values['no-proofs'], dropRecords: values['drop-records'], perHour: values['per-hour'], freeAttests: values['free-attests'], maxGas: values['max-gas'], cacheSeconds: values['cache-seconds'], signOut: values['sign-out'], signatureFile: values['signature-file'], keyFile: values['key-file'], statementFile: values['statement-file'] }
+  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'], noRelay: values['no-relay'], noProofs: values['no-proofs'], dropRecords: values['drop-records'], perHour: values['per-hour'], freeAttests: values['free-attests'], maxGas: values['max-gas'], cacheSeconds: values['cache-seconds'], signOut: values['sign-out'], signatureFile: values['signature-file'], keyFile: values['key-file'], statementFile: values['statement-file'] }
   setJson(!!opts.json)
   if (opts.version) { process.stdout.write(version + '\n'); return }
   const [cmd, ...rest] = positionals
@@ -219,6 +223,7 @@ async function main() {
     case 'update-key': return updateKey(rest, opts)
     case 'reattest': return reattest(rest, opts)
     case 'revoke': return revoke(rest, opts)
+    case 'cancel': return cancel(rest, opts)
     case 'submit': return submit(rest, opts)
     case 'authorize': if (rest[0] === 'finish') return finishAuthorization(rest.slice(1), opts); throw new CliError('Usage: thurin authorize finish <sign-out.json> --signature 0x…', EXIT.USAGE)
     case 'relay': return relay(rest, opts)

@@ -1,11 +1,11 @@
 import { toHex, encodeFunctionData, isAddress, getAddress, recoverTypedDataAddress, type Address } from 'viem'
 import { writeFileSync, readFileSync } from 'node:fs'
 import { normalize } from 'viem/ens'
-import { sameFingerprint,
+import { sameFingerprint, keyProblemText, claimCheckText,
   REGISTRY_ABI, parsePgpKey, verifyAttestation, leanKey, claimSignature, signatureEmail, identifyProof, fingerprintToBytes, OWNER_REVOKE_REASONS,
   type RevokeReason,
 } from '@thurinlabs/identity-kit/core'
-import { chainCtx, claimsOf, readRegistry, type ChainCtx } from '../lib/chain.js'
+import { chainCtx, claimsOf, readRegistry, refusal, type ChainCtx } from '../lib/chain.js'
 import { findKey, detachSign, exportMinimal, attestStatement, MAKE_KEY_HINT, addNameHint } from '../lib/gpg.js'
 import { loadAccount } from '../lib/keystore.js'
 import { accountSigner, commandSigner, fileSigner, providedSigner, readSignatureFile, readSignOut, SignLater, type Signer } from '../lib/signer.js'
@@ -90,6 +90,8 @@ export async function preflight(owner: Address, fpr: string, includeEmail: boole
     if (sigBytes > MAX_SIG) throw new CliError(`Signature is ${sigBytes} bytes; the registry accepts up to ${MAX_SIG}. Sign again with an ordinary key`, EXIT.FAILED)
     if (sigBytes + lean.binary.length > MAX_PAYLOAD) throw new CliError(`Key and signature are ${sigBytes + lean.binary.length} bytes together; the registry accepts up to ${MAX_PAYLOAD}. Drop old names or subkeys with gpg`, EXIT.FAILED)
     const v = await verifyAttestation({ pgpPublicKey: lean.binary, pgpSignature: cs.signature, fingerprint: fpr, ethAddress: owner })
+    const keyProblem = v.verified ? null : keyProblemText(v)
+    if (keyProblem) throw new CliError(`${keyProblem.sentence} ${keyProblem.fix}`, EXIT.FAILED)
     if (!v.verified) throw new CliError(`The signature does not verify against the ${source ? 'given' : 'exported'} key: ${v.reason}${source ? `\nSign exactly this line, with no line break after it: printf '%s' '${attestStatement(owner)}' | gpg --detach-sign --textmode --disable-signer-uid -u ${fpr}` : ''}`, EXIT.FAILED)
   }
   return { key: toHex(lean.binary), signature, kept: lean.kept, removed: lean.removed, proofs: proofs.length, otherNotes, bytes: lean.binary.length + sigBytes }
@@ -104,7 +106,7 @@ export async function send(ctx: ChainCtx, opts: Record<string, any>, functionNam
   const to = target ?? { address: ctx.registry, abi: REGISTRY_ABI }   // the registry unless a caller names another contract (ens link writes a resolver)
   const { createWalletClient, http } = await import('viem')
   const wallet = createWalletClient({ account, chain: ctx.client.chain, transport: http(ctx.rpcUrl) })
-  const gas = await ctx.client.estimateContractGas({ address: to.address, abi: to.abi, functionName, args, account } as any).catch((e: any) => { throw new CliError(`The registry would refuse this (${what.replace(/\.$/, '')}): ${e.shortMessage || e.message}`, EXIT.CHAIN) })
+  const gas = await ctx.client.estimateContractGas({ address: to.address, abi: to.abi, functionName, args, account } as any).catch((e: any) => { throw refusal(`The registry would refuse this (${what.replace(/\.$/, '')})`, e) })
   const price = await ctx.client.getGasPrice()
   const eth = Number(gas * price) / 1e18
   if (!opts.yes && !isJson() && !(await confirm(`${what.replace(/\.$/, '')}.\n${dim(`From ${account.address} on ${ctx.network} · ~${gas.toLocaleString('en-US')} gas · ~${eth.toFixed(6)} ETH.`)} Send?`))) throw new CliError('Cancelled', EXIT.USAGE)
@@ -171,7 +173,7 @@ export async function finishAuthorization(args: string[], opts: Record<string, a
   const nonce = Number(await ctx.client.readContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: 'nonces', args: [owner] } as any))
   if (nonce !== h.authorization.nonce) throw new CliError(`${owner} has published something since this file was made. Start over with --sign-out`, EXIT.FAILED)
   await ctx.client.simulateContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: FOR_FN[h.op as HandoffOp], args: forArgsOf(h), account: owner } as any)
-    .catch((e: any) => { throw new CliError(`The registry would refuse this permission: ${e.shortMessage || e.message}`, EXIT.CHAIN) })
+    .catch((e: any) => { throw refusal('The registry would refuse this permission', e) })
   await emitAuthorized(ctx, opts, h, owner)
 }
 
@@ -216,8 +218,8 @@ export async function handoff(ctx: ChainCtx, opts: Record<string, any>, op: Hand
 /**
  * --authorize: the keystore signs the write as EIP-712 typed data (free, no ETH) and the
  * result is a link or file that *anyone* can publish through the registry's `…For` call:
- * a friend, `thurin submit`, or a relayer. The owner cannot recall it before the deadline,
- * so the deadline is shown every time.
+ * a friend, `thurin submit`, or a relay. Only `thurin cancel`, a transaction of the owner's
+ * own, stops it before the deadline, so the deadline is shown every time.
  */
 export async function authorize(ctx: ChainCtx, opts: Record<string, any>, op: HandoffOp, owner: Address, fpr: string, p: Preflight | null, index?: number) {
   const h0 = buildHandoff(ctx, opts, op, owner, fpr, p, index)
@@ -228,7 +230,8 @@ export async function authorize(ctx: ChainCtx, opts: Record<string, any>, op: Ha
   }
   const nonce = Number(await ctx.client.readContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: 'nonces', args: [owner] } as any))
   let deadline: number
-  try { deadline = parseDeadline(opts.deadline) } catch (e: any) { throw new CliError(e.message, EXIT.USAGE) }
+  const now = Number((await ctx.client.getBlock()).timestamp)
+  try { deadline = parseDeadline(opts.deadline, '7d', now) } catch (e: any) { throw new CliError(e.message, EXIT.USAGE) }
   const h = h0
   h.authorization = { nonce, deadline, signature: '0x' }
   const typed = typedDataFor(h, ctx.client.chain!.id, ctx.registry)
@@ -249,7 +252,7 @@ export async function authorize(ctx: ChainCtx, opts: Record<string, any>, op: Ha
   if (recovered.toLowerCase() !== owner.toLowerCase()) throw new CliError(`The signature is from ${recovered}, not ${owner}, so it won't be handed out`, EXIT.FAILED)
   // Would the registry take it right now? (nonce, index, duplicate-claim rules; simulated from the owner, which needs no ETH)
   await ctx.client.simulateContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: FOR_FN[op], args: forArgsOf(h), account: owner } as any)
-    .catch((e: any) => { throw new CliError(`The registry would refuse this permission: ${e.shortMessage || e.message}`, EXIT.CHAIN) })
+    .catch((e: any) => { throw refusal('The registry would refuse this permission', e) })
 
   await emitAuthorized(ctx, opts, h, owner)
 }
@@ -265,20 +268,20 @@ const opWords = (op: string, index?: number) => `${OP_WORDS[op] ?? op}${index !=
 async function emitAuthorized(ctx: ChainCtx, opts: Record<string, any>, h: Handoff, owner: Address) {
   const { op, index, nonce, deadline } = { op: h.op, index: h.index, nonce: h.authorization!.nonce, deadline: h.authorization!.deadline }
   const fpr = h.fingerprint
-  const where = describeDeadline(deadline)
-  const head = `${ok('Signed a permission')} for ${opWords(op, index)} from ${owner}. Anyone can publish it for ${where}.\nIt can't be recalled before then; after that it does nothing.\n`
+  const where = describeDeadline(deadline, Number((await ctx.client.getBlock()).timestamp))
+  const head = `${ok('Signed a permission')} for ${opWords(op, index)} from ${owner}. Anyone can publish it for ${where}; after that it does nothing.\nTo stop it sooner: thurin cancel (a transaction from ${owner}).\n`
   if (opts.out) {
     writeFileSync(opts.out, JSON.stringify(h, null, 2) + '\n', { mode: 0o600 })   // a permission anyone holding it can publish
     out({ authorized: true, op, owner, fingerprint: fpr, network: ctx.network, index, nonce, deadline, file: opts.out }, () =>
       `${head}${label('file')}${opts.out}\n${dim(`Publish with: thurin submit ${opts.out}`)}`)
     return
   }
-  const relayer: string | undefined = opts.noRelayer ? undefined : (opts.relayer || readConfig().relayer)
-  if (relayer) {
-    info(`Sending to ${relayer}…`)
-    const r = await postToRelayer(relayer, h)
+  const relay: string | undefined = opts.noRelay ? undefined : (opts.relay || readConfig().relay)
+  if (relay) {
+    info(`Sending to ${relay}…`)
+    const r = await postToRelay(relay, h)
     out({ authorized: true, relayed: true, op, owner, fingerprint: fpr, network: ctx.network, index, nonce, ...r, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
-      `${ok('Published')} ${opWords(op, index)} for ${owner} via ${relayer}\n${label('tx')}${txUrl(ctx, r.hash)}${identityLine(ctx, owner)}`)
+      `${ok('Published')} ${opWords(op, index)} for ${owner} via ${relay}\n${label('tx')}${txUrl(ctx, r.hash)}${identityLine(ctx, owner)}`)
     return
   }
   const url = handoffUrl(siteFor(opts), h)
@@ -289,18 +292,18 @@ async function emitAuthorized(ctx: ChainCtx, opts: Record<string, any>, h: Hando
 }
 
 /** POST the permission to a relay (`thurin relay`); it runs the same checks and pays. */
-async function postToRelayer(url: string, h: Handoff): Promise<{ hash: string; block?: string; payer?: string }> {
+async function postToRelay(url: string, h: Handoff): Promise<{ hash: string; block?: string; payer?: string }> {
   let resp: Response
   try { resp = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(h) }) }
-  catch (e: any) { throw new CliError(`Couldn't reach the relay at ${url}: ${e.message}. Use --no-relayer to get a link instead`, EXIT.CHAIN) }
+  catch (e: any) { throw new CliError(`Couldn't reach the relay at ${url}: ${e.message}. Use --no-relay to get a link instead`, EXIT.CHAIN) }
   const body: any = await resp.json().catch(() => ({}))
-  if (!resp.ok) throw new CliError(`The relay refused (${resp.status}): ${body.error || resp.statusText}. Use --no-relayer to get a link instead`, resp.status === 429 || resp.status === 503 ? EXIT.CHAIN : EXIT.FAILED)
+  if (!resp.ok) throw new CliError(`The relay refused (${resp.status}): ${body.error || resp.statusText}. Use --no-relay to get a link instead`, resp.status === 429 || resp.status === 503 ? EXIT.CHAIN : EXIT.FAILED)
   if (!body.hash) throw new CliError(`The relay answered without a transaction hash: ${JSON.stringify(body)}`, EXIT.CHAIN)
   return body
 }
 
 /**
- * Every check a submitter or relayer makes before paying for someone's authorization:
+ * Every check a submitter or relay makes before paying for someone's authorization:
  * the signature recovers to the owner, the nonce is the chain's, the deadline is ahead,
  * the key is the key it names, and the PGP signature verifies the way a lookup will.
  */
@@ -312,8 +315,9 @@ export async function checkAuthorization(ctx: ChainCtx, h: Handoff) {
   const signer = await recoverTypedDataAddress({ ...(typed as any), signature: a.signature }).catch(() => null)
   if (!signer || signer.toLowerCase() !== h.owner) throw new CliError(`The permission wasn't signed by ${owner}${signer ? ` (it's from ${signer})` : ''}, so something in it was changed`, EXIT.FAILED)
   const nonce = Number(await ctx.client.readContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: 'nonces', args: [owner] } as any))
-  if (nonce !== a.nonce) throw new CliError(nonce > a.nonce ? `Already used, or ${owner} has published since signing. Ask for a new one` : `An earlier permission from ${owner} isn't published yet. Publish that one first`, EXIT.FAILED)
-  if (a.deadline <= Math.floor(Date.now() / 1000)) throw new CliError(`This permission ${describeDeadline(a.deadline)}. Ask ${owner} for a new one`, EXIT.FAILED)
+  if (nonce !== a.nonce) throw new CliError(nonce > a.nonce ? `Already used or cancelled, or ${owner} has published since signing. Ask for a new one` : `An earlier permission from ${owner} isn't published yet. Publish that one first`, EXIT.FAILED)
+  const now = Number((await ctx.client.getBlock()).timestamp)
+  if (a.deadline <= now) throw new CliError(`This permission ${describeDeadline(a.deadline, now)}. Ask ${owner} for a new one`, EXIT.FAILED)
   let proofs = 0, names: string[] = []
   if (h.key) {
     const info_ = await parsePgpKey(h.key)
@@ -322,10 +326,10 @@ export async function checkAuthorization(ctx: ChainCtx, h: Handoff) {
     names = info_.userIDs; proofs = info_.notations.map(identifyProof).filter(Boolean).length
     if (h.signature) {
       const v = await verifyAttestation({ pgpPublicKey: h.key, pgpSignature: h.signature, fingerprint: h.fingerprint, ethAddress: owner })
-      if (!v.verified) throw new CliError(`The PGP signature does not verify: ${v.reason}`, EXIT.FAILED)
+      if (!v.verified) throw new CliError(`The PGP side doesn't count: ${(keyProblemText(v) ?? claimCheckText(v)).sentence}`, EXIT.FAILED)
     }
   }
-  return { owner, names, proofs }
+  return { owner, names, proofs, now }
 }
 
 /** thurin submit <link|file|fragment>: publish someone else's authorization from this keystore. */
@@ -335,12 +339,12 @@ export async function submit(args: string[], opts: Record<string, any>) {
   try { h = readHandoffInput(args[0]) } catch (e: any) { throw new CliError(e.message, EXIT.USAGE) }
   if (opts.network && opts.network !== h.network) throw new CliError(`This permission is for ${h.network}, not ${opts.network}`, EXIT.USAGE)
   const ctx = chainCtx({ ...opts, network: h.network })
-  const { owner, names, proofs } = await checkAuthorization(ctx, h)
+  const { owner, names, proofs, now } = await checkAuthorization(ctx, h)
   const a = h.authorization!
   if (!isJson()) process.stderr.write(
     `${label('for')}${owner}\n${label('op')}${h.op}${h.index !== undefined ? ` #${h.index}` : ''}\n` +
     (h.key ? `${label('key')}${h.fingerprint}\n${label('names')}${names.join(', ')}\n${label('proofs')}${proofs}\n` : '') +
-    `${label('checks')}${ok('signed by owner')} · ${ok('not used yet')}${h.signature ? ` · ${ok('PGP verified')}` : ''} · expires in ${describeDeadline(a.deadline)}\n`)
+    `${label('checks')}${ok('signed by owner')} · ${ok('not used yet')}${h.signature ? ` · ${ok('PGP verified')}` : ''} · expires in ${describeDeadline(a.deadline, now)}\n`)
   const r = await send(ctx, opts, FOR_FN[h.op], forArgsOf(h), `Publish ${h.op} for ${owner}`)
   out({ ...r, owner, op: h.op, index: h.index, fingerprint: h.fingerprint, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
     `${ok('Published')} ${opWords(h.op, h.index)} for ${owner}\n${label('tx')}${txUrl(ctx, r.hash)}${identityLine(ctx, owner)}`)
@@ -432,8 +436,8 @@ export async function reattest(args: string[], opts: Record<string, any>) {
         encodeFunctionData({ abi: REGISTRY_ABI, functionName: 'revoke', args: [BigInt(idx), 'compromised'] }),
       ]], what)
     : await send(ctx, opts, 'reattest', [...reattestArgs], what)
-  out({ ...r, owner, revoked: idx, fingerprint: fpr, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
-    `${ok('Replaced')} claim #${idx} with ${bold(fpr)}\n${label('tx')}${txUrl(ctx, r.hash)}${identityLine(ctx, owner)}`)
+  out({ ...r, owner, revoked: idx, index: claims.length, fingerprint: fpr, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
+    `${ok('Replaced')} claim #${idx} with #${claims.length}, ${bold(fpr)}\n${label('tx')}${txUrl(ctx, r.hash)}${identityLine(ctx, owner)}`)
 }
 
 export async function revoke(args: string[], opts: Record<string, any>) {
@@ -453,6 +457,16 @@ export async function revoke(args: string[], opts: Record<string, any>) {
   const what = late ? `Mark claim #${idx}'s key (${c.fingerprint}) as compromised; this address can never claim it again` : `Revoke claim #${idx} (${c.fingerprint})${reason ? ` as ${reason}` : ''}${reason === 'compromised' ? '; this address can never claim it again' : ''}`
   const r = await send(ctx, opts, 'revoke', [BigInt(idx), reason], what)
   out({ ...r, owner, index: idx, reason, markedLater: late, tx: txUrl(ctx, r.hash) }, () => `${late ? `${bad('Marked')} claim #${idx}'s key compromised` : `${bad('Revoked')} claim #${idx}${reason ? ` (${reason})` : ''}`}\n${label('tx')}${txUrl(ctx, r.hash)}`)
+}
+
+/** Cancel every permission signed with the current nonce, by using it up. Needs ETH: it's the owner's own transaction. */
+export async function cancel(_args: string[], opts: Record<string, any>) {
+  const ctx = chainCtx(opts)
+  if (opts.authorize || opts.noKey) throw new CliError('cancel is your own transaction; --authorize and --no-key don\'t apply', EXIT.USAGE)
+  const owner = await ownerFor(ctx, opts)
+  const nonce = await readRegistry<bigint>(ctx, 'nonces', [owner])
+  const r = await send(ctx, opts, 'cancelAuthorization', [], `Cancel every unused permission ${owner} signed (nonce ${nonce})`)
+  out({ ...r, owner, cancelledNonce: Number(nonce), tx: txUrl(ctx, r.hash) }, () => `${ok('Cancelled')} every unused permission signed with nonce ${nonce}\n${label('tx')}${txUrl(ctx, r.hash)}`)
 }
 
 /** After "compromised" an address can never claim that key again; say so before gpg is asked to sign. */
