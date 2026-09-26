@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
-import type { Address } from 'viem'
+import { getAddress, type Address } from 'viem'
 import { sameFingerprint, keyIdOf } from '@thurinlabs/identity-kit/core'
 import { chainCtx, claimsOf, resolveOwners, detectLookup, ensNameOf, claimMatches, type ChainCtx, type Claim } from '../lib/chain.js'
 import { CliError, EXIT, ok, bold, dim, label } from '../lib/output.js'
@@ -130,7 +130,8 @@ export async function find(ctx: ChainCtx, search: string): Promise<Entry[]> {
     try { owners = (await resolveOwners(ctx, lookup)).owners } catch { throw e }
   }
   const out: Entry[] = []
-  for (const owner of owners) {
+  for (const found of owners) {
+    const owner = getAddress(found)   // the lookup may have lowercased it; show the checksummed form
     const claims = await claimsOf(ctx, owner)
     // The active, verified claim per key only: `--refresh-keys` on a revoked key gets 404, which is the point.
     const current = claims.filter(c => !c.revokedAt && c.verification?.verified && c.pgpPublicKey)
@@ -253,7 +254,8 @@ footer .col a:hover { color: var(--green); }
 ${message ? `<p class="note">${esc(message)}</p>` : ''}
 ${listing ? `<pre class="keys">${listing}</pre>` : ''}
 <p>Point gpg at it, once:</p>
-<pre>echo "keyserver ${esc(self)}" &gt;&gt; ~/.gnupg/dirmngr.conf &amp;&amp; gpgconf --kill dirmngr
+<pre>echo "keyserver ${esc(self)}" &gt;&gt; ~/.gnupg/dirmngr.conf
+gpgconf --kill dirmngr
 gpg --recv-keys &lt;fingerprint&gt;</pre>
 <footer>
   <span class="version">thurin keyserver ${VERSION} · ${ctx.network}</span>
