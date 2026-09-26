@@ -141,3 +141,28 @@ function algoName(algo: string, curve: string) {
   return ({ '1': 'RSA', '17': 'DSA', '18': 'ECDH', '19': 'ECDSA', '22': 'EdDSA' } as Record<string, string>)[algo] || `algo ${algo}`
 }
 function isoDate(unix: string) { return new Date(Number(unix) * 1000).toISOString().slice(0, 10) }
+
+/**
+ * Encrypt with gpg to the key in `recipientFile` (`--recipient-file`: used as is, nothing imported
+ * into the keyring). Streams: a file goes to `out` (binary unless `armor`); stdin goes to stdout,
+ * armored. `sign` signs with the user's own key; `hideRecipient` is gpg's --throw-keyids.
+ */
+export function encryptTo(recipientFile: string, { file, out, armor, sign, signer, hideRecipient }:
+  { file?: string; out?: string; armor: boolean; sign: boolean; signer?: string; hideRecipient: boolean }): Promise<void> {
+  const args = ['--encrypt', '--recipient-file', recipientFile]
+  if (hideRecipient) args.push('--throw-keyids')
+  if (armor) args.push('--armor')
+  if (sign) args.push('--sign', ...(signer ? ['-u', signer] : []))
+  if (out) args.push('--yes', '--output', out)
+  if (file) args.push(file)
+  return new Promise((resolve, reject) => {
+    noteGpg()
+    // --batch keeps gpg from asking questions; pinentry still asks for a passphrase when signing.
+    const child = spawn('gpg', ['--batch', ...args], { stdio: [file ? 'ignore' : 'inherit', out ? 'ignore' : 'inherit', 'pipe'] })
+    let err = ''
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', d => { err += d })
+    child.on('error', (e: any) => reject(new CliError(e.code === 'ENOENT' ? 'gpg not found. Install GnuPG 2.2 or newer.' : `gpg failed to start: ${e.message}`, EXIT.FAILED)))
+    child.on('close', code => code === 0 ? resolve() : reject(new CliError(`gpg --encrypt failed: ${err.trim().split('\n').slice(-3).join(' ')}`, EXIT.FAILED)))
+  })
+}

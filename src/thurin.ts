@@ -8,6 +8,7 @@ import { relay } from './commands/relay.js'
 import { keyserver } from './commands/keyserver.js'
 import { record } from './commands/record.js'
 import { ens } from './commands/ens.js'
+import { encrypt } from './commands/encrypt.js'
 import { setJson, CliError, EXIT, bold, dim } from './lib/output.js'
 import { watchNetwork, printNetwork } from './lib/network.js'
 import { readConfig } from './lib/config.js'
@@ -20,6 +21,7 @@ const HELP = `${bold('thurin')} ${version} · your PGP key on your Ethereum addr
   thurin status <ens|0x|fingerprint|keyid>   look up anyone's claims and proofs
   thurin attest                              add your PGP key to your address
   thurin reattest | update-key | revoke      change or end your claim
+  thurin encrypt <identity> [file]           encrypt to anyone's verified key
   thurin record ...                          records on your claim
   thurin key ...                             your PGP key (gpg does the work)
   thurin wallet ...                          your address (keystores)
@@ -37,6 +39,17 @@ const TOPICS: Record<string, string> = {
   thurin status <ens|0x|fingerprint|keyid>
       Claims, verification, and proofs for anyone. No keystore needed.
       --no-proofs   ask only the Ethereum node: proofs listed, not checked
+`,
+  encrypt: `${bold('Encrypt')}  (to the key of the claim that counts; Thurin never sees the message)
+
+  thurin encrypt <identity> [file]
+      No file: reads stdin, writes an armored message to stdout (or -o).
+      A file: writes <file>.gpg next to it (--armor: <file>.asc).
+      -o <path>          where to write
+      --sign             sign it with your own key too (--key picks which)
+      --show-recipient   name the recipient's key in the message (hidden by default)
+      Refuses an identity whose claim doesn't count or whose key can't receive.
+      The recipient opens it with: gpg --decrypt
 `,
   key: `${bold('Your PGP key')}  (gpg does the work)
 
@@ -190,7 +203,7 @@ ${dim(`Contract ${REGISTRY_ADDRESS} on Ethereum mainnet and Sepolia`)}
 const TOPIC_OF: Record<string, string> = {
   attest: 'claims', reattest: 'claims', 'update-key': 'claims', revoke: 'claims', claims: 'claims',
   'no-eth': 'no-eth', submit: 'no-eth', authorize: 'no-eth', cancel: 'no-eth',
-  status: 'status', key: 'key', wallet: 'wallet', record: 'record', ens: 'ens', keyserver: 'keyserver', relay: 'relay', options: 'options',
+  status: 'status', encrypt: 'encrypt', key: 'key', wallet: 'wallet', record: 'record', ens: 'ens', keyserver: 'keyserver', relay: 'relay', options: 'options',
 }
 function topicHelp(name: string | undefined): string {
   const t = name ? TOPIC_OF[name] : undefined
@@ -209,14 +222,15 @@ async function main() {
       from: { type: 'string' }, 'private-key': { type: 'boolean' },
       'no-key': { type: 'boolean' }, owner: { type: 'string' }, site: { type: 'string' },
       statement: { type: 'boolean' }, 'key-file': { type: 'string' }, 'statement-file': { type: 'string' },
-      authorize: { type: 'boolean' }, deadline: { type: 'string' }, out: { type: 'string' },
+      authorize: { type: 'boolean' }, deadline: { type: 'string' }, out: { type: 'string', short: 'o' },
+      sign: { type: 'boolean' }, armor: { type: 'boolean' }, 'show-recipient': { type: 'boolean' },
       'drop-records': { type: 'boolean' }, reason: { type: 'string' }, compromised: { type: 'boolean' },
       signer: { type: 'string' }, 'sign-out': { type: 'string' }, signature: { type: 'string' }, 'signature-file': { type: 'string' },
       relay: { type: 'string' }, 'no-relay': { type: 'boolean' }, 'no-proofs': { type: 'boolean' }, 'show-network': { type: 'boolean' },
       budget: { type: 'string' }, port: { type: 'string' }, host: { type: 'string' }, 'cache-seconds': { type: 'string' }, file: { type: 'string' }, index: { type: 'string' }, url: { type: 'string' }, 'per-hour': { type: 'string' }, 'free-attests': { type: 'string' }, 'max-gas': { type: 'string' },
     },
   })
-  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'], noRelay: values['no-relay'], noProofs: values['no-proofs'], dropRecords: values['drop-records'], perHour: values['per-hour'], freeAttests: values['free-attests'], maxGas: values['max-gas'], cacheSeconds: values['cache-seconds'], signOut: values['sign-out'], signatureFile: values['signature-file'], keyFile: values['key-file'], statementFile: values['statement-file'] }
+  const opts: Record<string, any> = { ...values, passwordFile: values['password-file'], includeEmail: values['include-email'], privateKey: values['private-key'], noKey: values['no-key'], noRelay: values['no-relay'], noProofs: values['no-proofs'], dropRecords: values['drop-records'], perHour: values['per-hour'], freeAttests: values['free-attests'], maxGas: values['max-gas'], cacheSeconds: values['cache-seconds'], signOut: values['sign-out'], showRecipient: values['show-recipient'], signatureFile: values['signature-file'], keyFile: values['key-file'], statementFile: values['statement-file'] }
   setJson(!!opts.json)
   if (opts.version) { process.stdout.write(version + '\n'); return }
   const [cmd, ...rest] = positionals
@@ -243,6 +257,7 @@ async function main() {
     case 'keyserver': return keyserver(rest, opts)
     case 'record': return record(rest, opts)
     case 'ens': return ens(rest, opts)
+    case 'encrypt': return encrypt(rest, opts)
     default: throw new CliError(`Unknown command "${cmd}". Try: thurin help`, EXIT.USAGE)
   }
 }
