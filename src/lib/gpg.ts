@@ -10,6 +10,16 @@ export function gpg(args: string[], input?: string): Promise<string> {
   return gpgBytes(args, input).then(b => b.toString('utf8'))
 }
 
+/** gpg's failure in plain words where we know what it means; otherwise its last lines. */
+export function gpgFailure(args: string[], stderr: string): string {
+  const op = args.find(a => a.startsWith('--')) ?? ''
+  if (/Timeout/i.test(stderr)) return `gpg gave up waiting for your key. If it's a security key, touch it when it blinks (and check it's the right one plugged in), then try again.`
+  if (/Operation cancelled|canceled/i.test(stderr)) return 'Cancelled at the PIN prompt.'
+  if (/Card error|No such device|card not present|OpenPGP card not available/i.test(stderr)) return `gpg can't reach the card that holds this key. Plug it in, then try again.`
+  if (/Bad PIN|PIN blocked/i.test(stderr)) return `The card refused the PIN. Check it with: gpg --card-status`
+  return `gpg ${op} failed: ${stderr.trim().split('\n').slice(-3).join(' ')}`
+}
+
 /** gpg with binary output (a raw signature or key). */
 export function gpgBytes(args: string[], input?: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -26,7 +36,7 @@ export function gpgBytes(args: string[], input?: string): Promise<Buffer> {
     })
     child.on('close', code => {
       if (code === 0) resolve(Buffer.concat(out))
-      else reject(new CliError(`gpg ${args.find(a => a.startsWith('--')) ?? ''} failed: ${err.trim().split('\n').slice(-3).join(' ')}`, EXIT.FAILED))
+      else reject(new CliError(gpgFailure(args, err), EXIT.FAILED))
     })
     if (input !== undefined) child.stdin.write(input)
     child.stdin.end()
@@ -163,6 +173,6 @@ export function encryptTo(recipientFile: string, { file, out, armor, sign, signe
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', d => { err += d })
     child.on('error', (e: any) => reject(new CliError(e.code === 'ENOENT' ? 'gpg not found. Install GnuPG 2.2 or newer.' : `gpg failed to start: ${e.message}`, EXIT.FAILED)))
-    child.on('close', code => code === 0 ? resolve() : reject(new CliError(`gpg --encrypt failed: ${err.trim().split('\n').slice(-3).join(' ')}`, EXIT.FAILED)))
+    child.on('close', code => code === 0 ? resolve() : reject(new CliError(gpgFailure(args, err), EXIT.FAILED)))
   })
 }
