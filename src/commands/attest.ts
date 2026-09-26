@@ -55,7 +55,7 @@ const byteLength = (v: string | Uint8Array) => typeof v === 'string' ? new TextE
 
 /**
  * Everything the registry and a lookup will check, run before any gas is spent. The key goes
- * on-chain lean (raw bytes, emails left out unless asked, SSH-only subkeys left out) and the
+ * on-chain lean (raw bytes, emails left out unless asked) and the
  * signature as its raw packet: exactly what thurin.id publishes.
  */
 export async function preflight(owner: Address, fpr: string, includeEmail: boolean, needSignature: boolean, source: PresignedInputs | null = null) {
