@@ -1,5 +1,5 @@
 import { listKeys, findKey, exportMinimal, importKey, MAKE_KEY_HINT, addNameHint, type KeyListing } from '../lib/gpg.js'
-import { parsePgpKey, identifyProof } from '@thurinlabs/identity-kit/core'
+import { parsePgpKey, identifyProof, keyStanding, sshKeys } from '@thurinlabs/identity-kit/core'
 import { chainCtx, claimsOf, detectLookup, resolveOwners } from '../lib/chain.js'
 import { readConfig, writeConfig } from '../lib/config.js'
 import { out, ok, bad, dim, bold, info, CliError, EXIT } from '../lib/output.js'
@@ -12,8 +12,9 @@ export async function key(args: string[], opts: Record<string, any>) {
     case 'add-name': throw new CliError(`Add a name with gpg: ${addNameHint(args[1] || '<fingerprint>')}`, EXIT.USAGE)
     case 'export': return keyExport(args.slice(1))
     case 'fetch': return keyFetch(args.slice(1), opts)
+    case 'ssh': return keySsh(args.slice(1), opts)
     case 'default': return keyDefault(args.slice(1))
-    default: throw new CliError('Usage: thurin key <list|export|fetch|default> …', EXIT.USAGE)
+    default: throw new CliError('Usage: thurin key <list|export|fetch|ssh|default> …', EXIT.USAGE)
   }
 }
 
@@ -45,14 +46,37 @@ async function keyFetch(args: string[], opts: Record<string, any>) {
   const ctx = chainCtx(opts)
   const { owners } = await resolveOwners(ctx, detectLookup(args[0]))
   for (const owner of owners) {
-    const claims = await claimsOf(ctx, owner)
-    const current = claims.find(c => !c.revokedAt && c.verification?.verified)
-    if (!current?.pgpPublicKey) continue
-    if (opts.import) { const r = await importKey(current.pgpPublicKey); info(r.trim().split('\n').pop() || ''); }
-    else process.stdout.write(current.pgpPublicKey)
+    const standing = keyStanding(await claimsOf(ctx, owner))
+    const armored = standing.kind === 'verified' ? standing.claim.pgpPublicKey : null
+    if (!armored) continue
+    if (opts.import) { const r = await importKey(armored); info(r.trim().split('\n').pop() || ''); }
+    else process.stdout.write(armored)
     return
   }
   throw new CliError('No active, verified claim for that identity. See: thurin status <identity>', EXIT.FAILED)
+}
+
+/** `authorized_keys` lines from the claim that counts; stdout carries nothing else. */
+async function keySsh(args: string[], opts: Record<string, any>) {
+  if (!args[0]) throw new CliError('Usage: thurin key ssh <ens|0x|fingerprint|keyid>', EXIT.USAGE)
+  const ctx = chainCtx(opts)
+  const { owners, ensName } = await resolveOwners(ctx, detectLookup(args[0]))
+  let counted = false
+  for (const owner of owners) {
+    const standing = keyStanding(await claimsOf(ctx, owner))
+    if (standing.kind !== 'verified' || !standing.claim.pgpPublicKey) continue
+    counted = true
+    const keys = await sshKeys(standing.claim.pgpPublicKey)
+    if (!keys.length) continue
+    const fp = standing.claim.fingerprint.toUpperCase()
+    const comment = `${ensName ?? owner} ${fp.slice(0, 4)}…${fp.slice(-4)}`
+    out({ owner, ensName: ensName ?? null, claim: standing.claim.index, fingerprint: fp, keys },
+      () => keys.map(k => `${k.line} ${comment}`).join('\n'))
+    return
+  }
+  throw new CliError(counted
+    ? `${args[0]} has a verified key, but it has no SSH (authentication) subkey.`
+    : `${args[0]} has no claim that counts. See: thurin status ${args[0]}`, EXIT.FAILED)
 }
 
 async function keyDefault(args: string[]) {

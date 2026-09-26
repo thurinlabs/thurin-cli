@@ -49,12 +49,17 @@ const TOPICS: Record<string, string> = {
   thurin key fetch <identity> [--import]
       The key stored on-chain for an identity.
 
+  thurin key ssh <identity>
+      Its SSH keys, as authorized_keys lines, from the claim that counts.
+      For sshd: AuthorizedKeysCommand /path/to/thurin key ssh 0x<address>
+
   thurin key default <fpr>
       The key to use when --key isn't given.
 
   thurin doesn't make or change keys; gpg does:
       gpg --quick-gen-key "Your Name" ed25519 sign 2y
       gpg --quick-add-key <fingerprint> cv25519 encr 2y
+      gpg --quick-add-key <fingerprint> ed25519 auth 2y    an SSH key
       gpg --quick-add-uid <fingerprint> "Your Name"    a name without an email
 `,
   wallet: `${bold('Your address')}  (keystores in ~/.config/thurin/keystores)
