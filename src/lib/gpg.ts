@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { noteGpg } from './network.js'
 import { CliError, EXIT } from './output.js'
 
 /**
@@ -12,6 +13,7 @@ export function gpg(args: string[], input?: string): Promise<string> {
 /** gpg with binary output (a raw signature or key). */
 export function gpgBytes(args: string[], input?: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
+    noteGpg()
     const child = spawn('gpg', ['--batch', '--no-tty', ...args], { stdio: ['pipe', 'pipe', 'pipe'] })
     const out: Buffer[] = []
     let err = ''

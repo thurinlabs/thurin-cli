@@ -46,12 +46,17 @@ export function watchNetwork(relayUrls: (string | undefined)[]): void {
 
 export function networkReport(): HostUse[] { return sortUses(uses) }
 
+let gpgRan = false
+/** gpg reaches keyservers through its own dirmngr, which this report can't see. */
+export function noteGpg(): void { gpgRan = true }
+
 /** To stderr, so --json results on stdout stay parseable. */
 export function printNetwork(json: boolean): void {
   const report = networkReport()
   if (json) { process.stderr.write(JSON.stringify({ network: report }) + '\n'); return }
-  if (!report.length) { process.stderr.write(dim('network     no hosts contacted') + '\n'); return }
+  const gpgLine = gpgRan ? dim("  gpg ran; its own network use (dirmngr) isn't seen here") + '\n' : ''
+  if (!report.length) { process.stderr.write(dim('network     no hosts contacted') + '\n' + gpgLine); return }
   const w = Math.max(...report.map(r => r.host.length))
   const rows = report.map(r => `  ${r.purpose.padEnd(12)} ${r.host.padEnd(w)}  ${r.requests} request${r.requests === 1 ? '' : 's'}`)
-  process.stderr.write(`${bold('network')}     hosts this command contacted (nothing is stored)\n${rows.join('\n')}\n${dim("  gpg's own network use (dirmngr) isn't seen here")}\n`)
+  process.stderr.write(`${bold('network')}     hosts this command contacted (nothing is stored)\n${rows.join('\n')}\n${gpgLine}`)
 }
