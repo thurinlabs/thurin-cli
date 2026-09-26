@@ -95,7 +95,11 @@ export async function signingKeyFor(fingerprint: string): Promise<string> {
   let inPrimary = false, primaryCanSign = false, pendingSub = false, subValid = false
   const subs: string[] = []
   for (const f of lines) {
-    if (f[0] === 'sec') { inPrimary = true; primaryCanSign = (f[11] || '').includes('s'); pendingSub = false }
+    if (f[0] === 'sec') {
+      if (f[1] === 'r') throw new CliError(`Key ${fingerprint} is revoked. Use a current key.`, EXIT.FAILED)
+      if (f[1] === 'e') throw new CliError(`Key ${fingerprint} has expired. Extend it (gpg --quick-set-expire ${fingerprint} 2y), then try again.`, EXIT.FAILED)
+      inPrimary = true; primaryCanSign = (f[11] || '').includes('s'); pendingSub = false
+    }
     else if (f[0] === 'fpr' && inPrimary) { inPrimary = false }
     else if (f[0] === 'ssb') { pendingSub = (f[11] || '').includes('s') && !['r', 'e', 'i', 'd'].includes(f[1]); subValid = pendingSub }
     else if (f[0] === 'fpr' && pendingSub) { if (subValid) subs.push(f[9]); pendingSub = false }

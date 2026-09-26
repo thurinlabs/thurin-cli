@@ -78,6 +78,11 @@ export async function preflight(owner: Address, fpr: string, includeEmail: boole
       if (!source.signature) throw new CliError(`The signature is needed too: --statement-file <sig>. The line to sign: thurin attest --statement --owner ${owner}`, EXIT.USAGE)
       raw = source.signature
     } else {
+      // gpg won't sign with an expired key, so say why before asking it to.
+      if (info_.expires && new Date(info_.expires).getTime() < Date.now()) {
+        const expired = keyProblemText({ verified: false, kind: 'expired', at: info_.expires })!
+        throw new CliError(`${expired.sentence} ${expired.fix}`, EXIT.FAILED)
+      }
       info(`Signing "${attestStatement(owner)}" with ${fpr} (gpg may ask for your passphrase).`)
       raw = await detachSign(fpr, attestStatement(owner))
     }
