@@ -297,7 +297,8 @@ async function postToRelay(url: string, h: Handoff): Promise<{ hash: string; blo
   try { resp = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(h) }) }
   catch (e: any) { throw new CliError(`Couldn't reach the relay at ${url}: ${e.message}. Use --no-relay to get a link instead`, EXIT.CHAIN) }
   const body: any = await resp.json().catch(() => ({}))
-  if (!resp.ok) throw new CliError(`The relay refused (${resp.status}): ${body.error || resp.statusText}. Use --no-relay to get a link instead`, resp.status === 429 || resp.status === 503 ? EXIT.CHAIN : EXIT.FAILED)
+  const said = body.error || resp.statusText
+  if (!resp.ok) throw new CliError(`The relay refused (${resp.status}): ${said}${/link/i.test(said) ? '' : '. Use --no-relay to get a link instead'}`, resp.status === 429 || resp.status === 503 ? EXIT.CHAIN : EXIT.FAILED)
   if (!body.hash) throw new CliError(`The relay answered without a transaction hash: ${JSON.stringify(body)}`, EXIT.CHAIN)
   return body
 }
@@ -483,9 +484,9 @@ function revokeReason(opts: Record<string, any>): RevokeReason {
   return r as RevokeReason
 }
 
-export function pickIndex(arg: string | undefined, claims: { revokedAt: number | null }[]): number {
+export function pickIndex(arg: string | undefined, claims: { revokedAt: number | null }[], how = 'give it as the first argument'): number {
   if (arg !== undefined) { const i = Number(arg); if (!Number.isInteger(i) || i < 0 || i >= claims.length) throw new CliError(`No claim #${arg} (this address has ${claims.length})`, EXIT.USAGE); return i }
   const active = claims.map((c, i) => [c, i] as const).filter(([c]) => !c.revokedAt)
   if (active.length === 1) return active[0][1]
-  throw new CliError(active.length ? 'Several active claims; give the index (thurin status <address>)' : 'No active claim for this address', EXIT.USAGE)
+  throw new CliError(active.length ? `Several active claims (${active.map(([, i]) => '#' + i).join(', ')}); pick one: ${how}. \`thurin status <address>\` lists them` : 'No active claim for this address', EXIT.USAGE)
 }

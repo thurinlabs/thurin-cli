@@ -109,6 +109,7 @@ export function readHandoffInput(input: string): Handoff {
     const h = JSON.parse(readFileSync(input, 'utf8'))
     return decodeHandoff(encodeHandoff(h))   // same validation as the link
   }
+  if (/[/\\]|\.json$/i.test(input.trim())) throw new Error(`No such file: ${input}`)
   if (/^[A-Za-z0-9_.-]+$/.test(input.trim())) return decodeHandoff(input.trim())
   throw new Error(`"${input}" is not a link, permission file, or fragment`)
 }

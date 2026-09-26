@@ -78,7 +78,7 @@ async function recordSet(args: string[], opts: Record<string, any>) {
   const ctx = chainCtx(opts)
   const owner = await ownerFor(ctx, opts)
   const claims = await claimsOf(ctx, owner)
-  const idx = pickIndex(opts.index, claims)
+  const idx = pickIndex(opts.index, claims, '--index <n>')
   if (!claims[idx]) throw new CliError(`No claim #${idx}`, EXIT.USAGE)
   if (!isJson()) process.stderr.write(`${label('claim')}#${idx} ${claims[idx].fingerprint}\n${label('name')}${kind}\n${label('value')}${value ? `${new TextEncoder().encode(value).length} bytes` : dim('(clear)')}\n`)
   const o = { ...opts, _record: { kind, value } }
@@ -100,7 +100,7 @@ async function addReleaseCommand(args: string[], opts: Record<string, any>) {
   const ctx = chainCtx(opts)
   const owner = await ownerFor(ctx, opts)
   const claims = await claimsOf(ctx, owner)
-  const idx = pickIndex(opts.index, claims)
+  const idx = pickIndex(opts.index, claims, '--index <n>')
   if (!claims[idx]) throw new CliError(`No claim #${idx}`, EXIT.USAGE)
   const existingText = await readRegistry<string>(ctx, 'recordText', [owner, BigInt(idx), 'thurin.releases'])
   let existing = null
