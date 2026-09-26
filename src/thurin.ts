@@ -235,9 +235,11 @@ async function main() {
 }
 
 main().catch((err) => {
-  const code = err instanceof CliError ? err.code : EXIT.FAILED
-  if (opts_json()) process.stdout.write(JSON.stringify({ error: err.message, code }) + '\n')
-  else process.stderr.write(`thurin: ${err.message}\n`)
+  // node:util parseArgs throws ERR_PARSE_ARGS_* for an unknown or malformed flag: a usage error.
+  const code = err instanceof CliError ? err.code : String(err?.code).startsWith('ERR_PARSE_ARGS') ? EXIT.USAGE : EXIT.FAILED
+  const message = err?.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION' ? `${err.message.split('. ')[0]}. Try: thurin help` : err.message
+  if (opts_json()) process.stdout.write(JSON.stringify({ error: message, code }) + '\n')
+  else process.stderr.write(`thurin: ${message}\n`)
   process.exit(code)
 })
 
