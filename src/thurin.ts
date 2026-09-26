@@ -9,6 +9,8 @@ import { keyserver } from './commands/keyserver.js'
 import { record } from './commands/record.js'
 import { ens } from './commands/ens.js'
 import { setJson, CliError, EXIT, bold, dim } from './lib/output.js'
+import { watchNetwork, printNetwork } from './lib/network.js'
+import { readConfig } from './lib/config.js'
 import { REGISTRY_ADDRESS } from '@thurinlabs/identity-kit/core'
 
 const { version } = createRequire(import.meta.url)('../package.json') as { version: string }
@@ -171,6 +173,8 @@ More: thurin help no-eth   (your ETH is elsewhere, or you have none)
   --password-file <path>             for the keystore
   --site <url>                       where links point
   --json                             machine-readable output
+  --show-network                     list the hosts a command contacted when it ends (not for
+                                     keyserver or relay); nothing is stored. THURIN_SHOW_NETWORK=1
   --yes                              don't ask before sending
   --version  --help
 
@@ -203,7 +207,7 @@ async function main() {
       authorize: { type: 'boolean' }, deadline: { type: 'string' }, out: { type: 'string' },
       'drop-records': { type: 'boolean' }, reason: { type: 'string' }, compromised: { type: 'boolean' },
       signer: { type: 'string' }, 'sign-out': { type: 'string' }, signature: { type: 'string' }, 'signature-file': { type: 'string' },
-      relay: { type: 'string' }, 'no-relay': { type: 'boolean' }, 'no-proofs': { type: 'boolean' },
+      relay: { type: 'string' }, 'no-relay': { type: 'boolean' }, 'no-proofs': { type: 'boolean' }, 'show-network': { type: 'boolean' },
       budget: { type: 'string' }, port: { type: 'string' }, host: { type: 'string' }, 'cache-seconds': { type: 'string' }, file: { type: 'string' }, index: { type: 'string' }, url: { type: 'string' }, 'per-hour': { type: 'string' }, 'free-attests': { type: 'string' }, 'max-gas': { type: 'string' },
     },
   })
@@ -214,6 +218,10 @@ async function main() {
   if (cmd === 'help') { process.stdout.write(topicHelp(rest[0])); return }
   if (opts.help) { process.stdout.write(topicHelp(cmd)); return }
   if (!cmd) { process.stdout.write(HELP); process.exitCode = EXIT.USAGE; return }  // bare `thurin` is a usage error; `--help` is not
+  // Servers never finish, so there'd be no moment to print.
+  if ((values['show-network'] || process.env.THURIN_SHOW_NETWORK === '1') && cmd !== 'keyserver' && cmd !== 'relay') {
+    watchNetwork([opts.relay, readConfig().relay]); watching = true
+  }
 
   switch (cmd) {
     case 'status': return status(rest, opts)
@@ -234,12 +242,15 @@ async function main() {
   }
 }
 
-main().catch((err) => {
+let watching = false
+
+main().then(() => { if (watching) printNetwork(opts_json()) }).catch((err) => {
   // node:util parseArgs throws ERR_PARSE_ARGS_* for an unknown or malformed flag: a usage error.
   const code = err instanceof CliError ? err.code : String(err?.code).startsWith('ERR_PARSE_ARGS') ? EXIT.USAGE : EXIT.FAILED
   const message = err?.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION' ? `${err.message.split('. ')[0]}. Try: thurin help` : err.message
   if (opts_json()) process.stdout.write(JSON.stringify({ error: message, code }) + '\n')
   else process.stderr.write(`thurin: ${message}\n`)
+  if (watching) printNetwork(opts_json())
   process.exit(code)
 })
 
