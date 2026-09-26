@@ -5,6 +5,7 @@ import { sameFingerprint, keyProblemText, claimCheckText,
   REGISTRY_ABI, parsePgpKey, verifyAttestation, leanKey, claimSignature, signatureEmail, identifyProof, fingerprintToBytes, OWNER_REVOKE_REASONS,
   type RevokeReason,
 } from '@thurinlabs/identity-kit/core'
+import { feesFor } from '../lib/fees.js'
 import { chainCtx, claimsOf, readRegistry, refusal, type ChainCtx } from '../lib/chain.js'
 import { findKey, detachSign, exportMinimal, attestStatement, MAKE_KEY_HINT, addNameHint } from '../lib/gpg.js'
 import { loadAccount } from '../lib/keystore.js'
@@ -112,10 +113,11 @@ export async function send(ctx: ChainCtx, opts: Record<string, any>, functionNam
   const { createWalletClient, http } = await import('viem')
   const wallet = createWalletClient({ account, chain: ctx.client.chain, transport: http(ctx.rpcUrl) })
   const gas = await ctx.client.estimateContractGas({ address: to.address, abi: to.abi, functionName, args, account } as any).catch((e: any) => { throw refusal(`The registry would refuse this (${what.replace(/\.$/, '')})`, e) })
-  const price = await ctx.client.getGasPrice()
+  const fees = await feesFor(ctx.client)
+  const price = fees?.expected ?? await ctx.client.getGasPrice()
   const eth = Number(gas * price) / 1e18
   if (!opts.yes && !isJson() && !(await confirm(`${what.replace(/\.$/, '')}.\n${dim(`From ${account.address} on ${ctx.network} · ~${gas.toLocaleString('en-US')} gas · ~${eth.toFixed(6)} ETH.`)} Send?`))) throw new CliError('Cancelled', EXIT.USAGE)
-  const hash = await wallet.writeContract({ address: to.address, abi: to.abi, functionName, args, account, chain: ctx.client.chain } as any)
+  const hash = await wallet.writeContract({ address: to.address, abi: to.abi, functionName, args, account, chain: ctx.client.chain, ...(fees ? { maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas } : {}) } as any)
   info(`Sent ${hash}. Waiting for confirmation…`)
   const receipt = await ctx.client.waitForTransactionReceipt({ hash })
   if (receipt.status !== 'success') throw new CliError(`The transaction failed, so nothing changed: ${hash}`, EXIT.CHAIN)

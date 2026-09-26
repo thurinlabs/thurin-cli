@@ -10,6 +10,7 @@ import { checkAuthorization } from './attest.js'
 import { Limits, LimitError, DEFAULT_LIMITS } from '../lib/limits.js'
 import { CliError, EXIT, ok, warn, bold, dim, label } from '../lib/output.js'
 import { listen } from '../lib/listen.js'
+import { feesFor } from '../lib/fees.js'
 
 /**
  * thurin relay: `thurin submit` behind an HTTP port. Accepts the same JSON a hand-off
@@ -64,11 +65,12 @@ export async function relay(_args: string[], opts: Record<string, any>) {
         const fn = FOR_FN[h.op], args = forArgsOf(h)
         const gas = await ctx.client.estimateContractGas({ address: ctx.registry, abi: REGISTRY_ABI, functionName: fn, args, account } as any)
           .catch((e: any) => { throw refusal('The registry would refuse this', e) })
-        const price = await ctx.client.getGasPrice()
+        const fees = await feesFor(ctx.client)
+        const price = fees?.expected ?? await ctx.client.getGasPrice()
         const estEth = Number(gas * price * 12n / 10n) / 1e18   // 20 % headroom for a price move
         limits.check(caller, owner, h.op, gas, estEth)
         limits.record(caller, owner, h.op, estEth)
-        const hash = await wallet.writeContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: fn, args, account, chain: ctx.client.chain } as any)
+        const hash = await wallet.writeContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: fn, args, account, chain: ctx.client.chain, ...(fees ? { maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas } : {}) } as any)
         const receipt = await ctx.client.waitForTransactionReceipt({ hash })
         if (receipt.status !== 'success') throw new CliError(`The transaction failed, so nothing changed: ${hash}`, EXIT.CHAIN)
         return { hash, block: receipt.blockNumber.toString(), owner, op: h.op, proofs, payer: account.address as Address, identity: ctx.site ? `${ctx.site}/eth/${owner}` : null }
