@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
+import { createRequire } from 'node:module'
 import { createWalletClient, http, formatEther, type Address } from 'viem'
 import { REGISTRY_ABI } from '@thurinlabs/identity-kit/core'
 import { chainCtx, refusal } from '../lib/chain.js'
@@ -11,6 +12,8 @@ import { Limits, LimitError, DEFAULT_LIMITS } from '../lib/limits.js'
 import { CliError, EXIT, ok, warn, bold, dim, label } from '../lib/output.js'
 import { listen } from '../lib/listen.js'
 import { feesFor } from '../lib/fees.js'
+
+const VERSION: string = (() => { try { return createRequire(import.meta.url)('../package.json').version } catch { return process.env.npm_package_version || '0' } })()
 
 /**
  * thurin relay: `thurin submit` behind an HTTP port. Accepts the same JSON a hand-off
@@ -48,7 +51,7 @@ export async function relay(_args: string[], opts: Record<string, any>) {
     res.setHeader('access-control-allow-headers', 'content-type')
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }
     if (req.method === 'GET') {
-      return reply(res, 200, { ok: true, network: ctx.network, chainId: ctx.client.chain?.id, payer: account.address, budgetEth: limits.cfg.budgetEth, spentTodayEth: limits.spentLast24h(), freeAttestsPerOwner: limits.cfg.attestsPerOwner })
+      return reply(res, 200, { ok: true, version: VERSION, network: ctx.network, chainId: ctx.client.chain?.id, payer: account.address, budgetEth: limits.cfg.budgetEth, spentTodayEth: limits.spentLast24h(), freeAttestsPerOwner: limits.cfg.attestsPerOwner })
     }
     if (req.method !== 'POST') return reply(res, 405, { error: 'POST a signed permission' })
     const caller = callerKey(req)
