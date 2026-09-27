@@ -29,9 +29,15 @@ async function password(opts: Record<string, any>, confirmIt: boolean) {
   return p
 }
 
+/** Secrets go to a person at a terminal, never into a pipe, a file, or an agent's transcript. */
+export function requireTerminal(what: string, stdout: { isTTY?: boolean } = process.stdout) {
+  if (!stdout.isTTY) throw new CliError(`Refusing to print ${what} anywhere but a terminal. Run this yourself in a terminal.`, EXIT.USAGE)
+}
+
 async function create(args: string[], opts: Record<string, any>) {
   const name = args[0]
   if (!name) throw new CliError('Usage: thurin wallet create <name>', EXIT.USAGE)
+  requireTerminal('a recovery phrase')
   const mnemonic = generateMnemonic(english)
   const acct = mnemonicToAccount(mnemonic)
   const pk = `0x${bytesToHex(acct.getHdKey().privateKey!)}` as `0x${string}`
@@ -88,6 +94,7 @@ async function exportWallet(args: string[], opts: Record<string, any>) {
   if (!existsSync(keystorePath(name))) throw new CliError(`No keystore "${name}". See: thurin wallet list`, EXIT.USAGE)
   const ks = JSON.parse(readFileSync(keystorePath(name), 'utf8')) as KeystoreV3
   if (opts.privateKey) {
+    requireTerminal('a private key')
     warn('Printing a private key to the terminal.')
     process.stdout.write(decryptKeystore(ks, await prompt(`Password for ${name}: `, true)) + '\n')
   } else {
