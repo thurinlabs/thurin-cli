@@ -1,10 +1,9 @@
 import { toHex, encodeFunctionData, isAddress, getAddress, type Address } from 'viem'
-import { permissionSigned } from '../lib/permission.js'
 import { writeFileSync, readFileSync } from 'node:fs'
 import { normalize } from 'viem/ens'
 import { sameFingerprint, keyProblemText, claimCheckText,
   REGISTRY_ABI, parsePgpKey, verifyAttestation, leanKey, claimSignature, signatureEmail, identifyProof, fingerprintToBytes, OWNER_REVOKE_REASONS,
-  type RevokeReason,
+  type RevokeReason, permissionSigned,
 } from '@thurinlabs/identity-kit/core'
 import { feesFor } from '../lib/fees.js'
 import { chainCtx, claimsOf, readRegistry, refusal, type ChainCtx } from '../lib/chain.js'
@@ -176,7 +175,7 @@ export async function finishAuthorization(args: string[], opts: Record<string, a
   const ctx = chainCtx({ ...opts, network: h.network })
   const owner = getAddress(h.owner)
   h.authorization.signature = opts.signature ? await providedSigner(opts.signature).signTypedData(typedData) : readSignatureFile(opts.signatureFile)
-  const signed = await permissionSigned(ctx, typedData, h.authorization.signature, owner)
+  const signed = await permissionSigned(ctx.client as any, typedData as any, h.authorization.signature, owner)
   if (!signed.ok) throw new CliError(`${signed.reason}, so it won't be handed out`, EXIT.FAILED)
   const nonce = Number(await ctx.client.readContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: 'nonces', args: [owner] } as any))
   if (nonce !== h.authorization.nonce) throw new CliError(`${owner} has published something since this file was made. Start over with --sign-out`, EXIT.FAILED)
@@ -256,7 +255,7 @@ export async function authorize(ctx: ChainCtx, opts: Record<string, any>, op: Ha
     throw e
   }
   // Prove it back before handing it out: whoever signed, this is the check that matters.
-  const signed = await permissionSigned(ctx, typed, h.authorization.signature, owner)
+  const signed = await permissionSigned(ctx.client as any, typed as any, h.authorization.signature, owner)
   if (!signed.ok) throw new CliError(`${signed.reason}, so it won't be handed out`, EXIT.FAILED)
   // Would the registry take it right now? (nonce, index, duplicate-claim rules; simulated from the owner, which needs no ETH)
   await ctx.client.simulateContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: FOR_FN[op], args: forArgsOf(h), account: owner } as any)
@@ -321,7 +320,7 @@ export async function checkAuthorization(ctx: ChainCtx, h: Handoff) {
   const owner = getAddress(h.owner)
   const a = h.authorization
   const typed = typedDataFor(h, ctx.client.chain!.id, ctx.registry)
-  const signed = await permissionSigned(ctx, typed, a.signature, owner)
+  const signed = await permissionSigned(ctx.client as any, typed as any, a.signature, owner)
   if (!signed.ok) throw new CliError(signed.signer
     ? `The permission wasn't signed by ${owner} (it's from ${signed.signer}), so something in it was changed`
     : `${signed.reason}. Ask for a new one`, EXIT.FAILED)
