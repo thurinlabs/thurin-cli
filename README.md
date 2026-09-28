@@ -14,6 +14,8 @@ npm install -g @thurinlabs/thurin
 npx @thurinlabs/thurin status thurinlabs.eth
 ```
 
+The package is one file with every dependency built in, so installing it fetches nothing else, and a [signed release](https://docs.thurin.id/#/guides/verify-release) covers every line that runs. Bundled licenses: `dist/THIRD-PARTY-LICENSES.txt`.
+
 Node 20 or newer, and GnuPG 2.2 or newer for anything that touches a key. Releases are signed: [how to check one](https://docs.thurin.id/#/guides/verify-release).
 
 `thurin --help` is one screen; `thurin help <command>` has the rest.

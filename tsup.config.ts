@@ -5,9 +5,13 @@ export default defineConfig({
   format: ['esm'],
   platform: 'node',
   target: 'node20',
-  sourcemap: true,
+  sourcemap: false,
   clean: true,
-  banner: { js: '#!/usr/bin/env node' },
-  // identity-kit/core, viem, openpgp and friends stay external: npm installs them.
-  external: ['@thurinlabs/identity-kit', 'viem', 'openpgp', 'eckey-utils'],
+  splitting: false,
+  // Every dependency is bundled: the signed tarball is every line of code the CLI runs, and
+  // installing it fetches nothing else. `require` for the CommonJS parts (ws) inside an ESM bundle.
+  noExternal: [/.*/],
+  // Optional native speedups ws tries to load; absent is fine.
+  external: ['bufferutil', 'utf-8-validate'],
+  banner: { js: "#!/usr/bin/env node\nimport { createRequire as __thurinRequire } from 'node:module'; const require = __thurinRequire(import.meta.url);" },
 })
