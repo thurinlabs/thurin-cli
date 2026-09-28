@@ -1,4 +1,5 @@
-import { toHex, encodeFunctionData, isAddress, getAddress, recoverTypedDataAddress, type Address } from 'viem'
+import { toHex, encodeFunctionData, isAddress, getAddress, type Address } from 'viem'
+import { permissionSigned } from '../lib/permission.js'
 import { writeFileSync, readFileSync } from 'node:fs'
 import { normalize } from 'viem/ens'
 import { sameFingerprint, keyProblemText, claimCheckText,
@@ -175,8 +176,8 @@ export async function finishAuthorization(args: string[], opts: Record<string, a
   const ctx = chainCtx({ ...opts, network: h.network })
   const owner = getAddress(h.owner)
   h.authorization.signature = opts.signature ? await providedSigner(opts.signature).signTypedData(typedData) : readSignatureFile(opts.signatureFile)
-  const recovered = await recoverTypedDataAddress({ ...(typedData as any), signature: h.authorization.signature })
-  if (recovered.toLowerCase() !== owner.toLowerCase()) throw new CliError(`The signature is from ${recovered}, not ${owner}, so it won't be handed out`, EXIT.FAILED)
+  const signed = await permissionSigned(ctx, typedData, h.authorization.signature, owner)
+  if (!signed.ok) throw new CliError(`${signed.reason}, so it won't be handed out`, EXIT.FAILED)
   const nonce = Number(await ctx.client.readContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: 'nonces', args: [owner] } as any))
   if (nonce !== h.authorization.nonce) throw new CliError(`${owner} has published something since this file was made. Start over with --sign-out`, EXIT.FAILED)
   await ctx.client.simulateContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: FOR_FN[h.op as HandoffOp], args: forArgsOf(h), account: owner } as any)
@@ -255,8 +256,8 @@ export async function authorize(ctx: ChainCtx, opts: Record<string, any>, op: Ha
     throw e
   }
   // Prove it back before handing it out: whoever signed, this is the check that matters.
-  const recovered = await recoverTypedDataAddress({ ...(typed as any), signature: h.authorization.signature })
-  if (recovered.toLowerCase() !== owner.toLowerCase()) throw new CliError(`The signature is from ${recovered}, not ${owner}, so it won't be handed out`, EXIT.FAILED)
+  const signed = await permissionSigned(ctx, typed, h.authorization.signature, owner)
+  if (!signed.ok) throw new CliError(`${signed.reason}, so it won't be handed out`, EXIT.FAILED)
   // Would the registry take it right now? (nonce, index, duplicate-claim rules; simulated from the owner, which needs no ETH)
   await ctx.client.simulateContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: FOR_FN[op], args: forArgsOf(h), account: owner } as any)
     .catch((e: any) => { throw refusal('The registry would refuse this permission', e) })
@@ -320,8 +321,10 @@ export async function checkAuthorization(ctx: ChainCtx, h: Handoff) {
   const owner = getAddress(h.owner)
   const a = h.authorization
   const typed = typedDataFor(h, ctx.client.chain!.id, ctx.registry)
-  const signer = await recoverTypedDataAddress({ ...(typed as any), signature: a.signature }).catch(() => null)
-  if (!signer || signer.toLowerCase() !== h.owner) throw new CliError(`The permission wasn't signed by ${owner}${signer ? ` (it's from ${signer})` : ''}, so something in it was changed`, EXIT.FAILED)
+  const signed = await permissionSigned(ctx, typed, a.signature, owner)
+  if (!signed.ok) throw new CliError(signed.signer
+    ? `The permission wasn't signed by ${owner} (it's from ${signed.signer}), so something in it was changed`
+    : `${signed.reason}. Ask for a new one`, EXIT.FAILED)
   const nonce = Number(await ctx.client.readContract({ address: ctx.registry, abi: REGISTRY_ABI, functionName: 'nonces', args: [owner] } as any))
   if (nonce !== a.nonce) throw new CliError(nonce > a.nonce ? `Already used or cancelled, or ${owner} has published since signing. Ask for a new one` : `An earlier permission from ${owner} isn't published yet. Publish that one first`, EXIT.FAILED)
   const now = Number((await ctx.client.getBlock()).timestamp)
