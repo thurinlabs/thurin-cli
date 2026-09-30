@@ -1,4 +1,4 @@
-import { toHex, encodeFunctionData, isAddress, getAddress, type Address } from 'viem'
+import { toHex, encodeFunctionData, isAddress, getAddress, formatEther, type Address } from 'viem'
 import { writeFileSync, readFileSync } from 'node:fs'
 import { normalize } from 'viem/ens'
 import { sameFingerprint, keyProblemText, claimCheckText,
@@ -107,6 +107,21 @@ function summary(p: Awaited<ReturnType<typeof preflight>>) {
   return `${label('names')}${p.kept.join(', ')}${p.removed.length ? dim(`  (left out: ${p.removed.join(', ')})`) : ''}\n${label('proofs')}${p.proofs}\n${p.otherNotes.length ? `${label('notations')}${p.otherNotes.join('\n' + ' '.repeat(12))}\n` : ''}${label('size')}${(p.bytes / 1024).toFixed(1)} KB`
 }
 
+// The writes that have a way round a missing fee (thurin help no-eth): the others just get the fact.
+const NO_ETH_WAY = new Set(['attest', 'reattest', 'updateKey', 'setRecord', 'revoke', 'markCompromised', 'multicall'])
+const NO_FUNDS = /insufficient funds|exceeds allowance|exceeds balance/i
+
+/** Not enough ETH for the fee, said plainly; for a claim-type write, where the docs cover doing it without. */
+export function notEnoughEth(functionName: string, balance: bigint | null, needWei: bigint | null): CliError {
+  const fact = balance === 0n ? 'This address has no ETH to pay the fee.'
+    : balance !== null && needWei !== null ? `This address has ${formatEther(balance)} ETH; the fee can be up to ${formatEther(needWei)}.`
+    : "This address doesn't have enough ETH to pay the fee."
+  const way = NO_ETH_WAY.has(functionName)
+    ? `\n${['attest', 'reattest'].includes(functionName) ? 'Ways to claim' : 'Ways to do this'} without ETH: thurin help no-eth  ·  https://docs.thurin.id/#/cli?id=no-eth-on-this-machine`
+    : ''
+  return new CliError(fact + way, EXIT.FAILED)
+}
+
 export async function send(ctx: ChainCtx, opts: Record<string, any>, functionName: string, args: unknown[], what: string, target?: { address: Address; abi: unknown }) {
   const account = await accountFor(opts)
   const to = target ?? { address: ctx.registry, abi: REGISTRY_ABI }   // the registry unless a caller names another contract (ens link writes a resolver)
@@ -116,8 +131,13 @@ export async function send(ctx: ChainCtx, opts: Record<string, any>, functionNam
   const fees = await feesFor(ctx.client)
   const price = fees?.expected ?? await ctx.client.getGasPrice()
   const eth = Number(gas * price) / 1e18
+  // Before asking: the node refuses a send the balance can't cover at the fee cap, so say so here.
+  const needWei = gas * (fees?.maxFeePerGas ?? price)
+  const balance = await ctx.client.getBalance({ address: account.address }).catch(() => null)
+  if (balance !== null && balance < needWei) throw notEnoughEth(functionName, balance, needWei)
   if (!opts.yes && !isJson() && !(await confirm(`${what.replace(/\.$/, '')}.\n${dim(`From ${account.address} on ${ctx.network} · ~${gas.toLocaleString('en-US')} gas · ~${eth.toFixed(6)} ETH.`)} Send?`))) throw new CliError('Cancelled', EXIT.USAGE)
   const hash = await wallet.writeContract({ address: to.address, abi: to.abi, functionName, args, account, chain: ctx.client.chain, ...(fees ? { maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas } : {}) } as any)
+    .catch((e: any) => { throw NO_FUNDS.test(`${e.shortMessage ?? ''} ${e.details ?? ''} ${e.message ?? ''}`) ? notEnoughEth(functionName, null, null) : e })
   info(`Sent ${hash}. Waiting for confirmation…`)
   const receipt = await ctx.client.waitForTransactionReceipt({ hash })
   if (receipt.status !== 'success') throw new CliError(`The transaction failed, so nothing changed: ${hash}`, EXIT.CHAIN)
