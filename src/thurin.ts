@@ -11,7 +11,7 @@ import { ens } from './commands/ens.js'
 import { encrypt } from './commands/encrypt.js'
 import { setJson, CliError, EXIT, bold, dim } from './lib/output.js'
 import { watchNetwork, printNetwork } from './lib/network.js'
-import { readConfig } from './lib/config.js'
+import { readConfig, DEFAULT_RELAY } from './lib/config.js'
 import { REGISTRY_ADDRESS } from '@thurinlabs/identity-kit/core'
 
 const { version } = createRequire(import.meta.url)('../package.json') as { version: string }
@@ -123,7 +123,8 @@ More: thurin help no-eth   (your ETH is elsewhere, or you have none)
 
   --authorize [--deadline 7d] [--out f.json]
       No ETH here: sign a free permission that anyone can publish and pay for.
-      --relay <url>       post it to a relay that pays
+      (on mainnet it goes to a relay that pays; if that can't, you get a link)
+      --relay <url>       use this relay instead
       --no-relay          make a link instead
       --signer <cmd>      sign with a program, e.g. a card (needs --owner)
       --sign-out f.json   air gap: write what needs signing, and stop (needs --owner)
@@ -239,7 +240,7 @@ async function main() {
   if (!cmd) { process.stdout.write(HELP); process.exitCode = EXIT.USAGE; return }  // bare `thurin` is a usage error; `--help` is not
   // Servers never finish, so there'd be no moment to print.
   if ((values['show-network'] || process.env.THURIN_SHOW_NETWORK === '1') && cmd !== 'keyserver' && cmd !== 'relay') {
-    watchNetwork([opts.relay, readConfig().relay]); watching = true
+    watchNetwork([opts.relay, readConfig().relay, ...Object.values(DEFAULT_RELAY)]); watching = true
   }
 
   switch (cmd) {

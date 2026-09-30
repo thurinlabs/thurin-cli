@@ -12,7 +12,7 @@ import { loadAccount } from '../lib/keystore.js'
 import { accountSigner, commandSigner, fileSigner, providedSigner, readSignatureFile, readSignOut, SignLater, type Signer } from '../lib/signer.js'
 import { prompt, confirm } from '../lib/prompt.js'
 import { offerToOpen } from '../lib/open.js'
-import { readConfig } from '../lib/config.js'
+import { readConfig, DEFAULT_RELAY } from '../lib/config.js'
 import { out, info, ok, bad, dim, bold, label, isJson, CliError, EXIT } from '../lib/output.js'
 import {
   handoffUrl, readHandoffInput, typedDataFor, forArgsOf, payloadArg, parseDeadline, describeDeadline, FOR_FN,
@@ -303,18 +303,27 @@ async function emitAuthorized(ctx: ChainCtx, opts: Record<string, any>, h: Hando
       `${head}${label('file')}${opts.out}\n${dim(`Publish with: thurin submit ${opts.out}`)}`)
     return
   }
-  const relay: string | undefined = opts.noRelay ? undefined : (opts.relay || readConfig().relay)
+  const chosen: string | undefined = opts.relay || readConfig().relay
+  const relay: string | undefined = opts.noRelay ? undefined : (chosen || DEFAULT_RELAY[ctx.network])
+  let relayError: string | undefined
   if (relay) {
-    info(`Sending to ${relay}…`)
-    const r = await postToRelay(relay, h)
-    out({ authorized: true, relayed: true, op, owner, fingerprint: fpr, network: ctx.network, index, nonce, ...r, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
-      `${ok('Published')} ${opWords(op, index)} for ${owner} via ${relay}\n${label('tx')}${txUrl(ctx, r.hash)}${identityLine(ctx, owner)}`)
-    return
+    info(`Posting to ${new URL(relay).host} (the relay sees your IP)…`)
+    try {
+      const r = await postToRelay(relay, h)
+      out({ authorized: true, relayed: true, op, owner, fingerprint: fpr, network: ctx.network, index, nonce, ...r, identity: identityUrl(ctx, owner), tx: txUrl(ctx, r.hash) }, () =>
+        `${ok('Published')} ${opWords(op, index)} for ${owner} via ${relay}\n${label('tx')}${txUrl(ctx, r.hash)}${identityLine(ctx, owner)}`)
+      return
+    } catch (e) {
+      // A relay you chose failing is an error; the default one failing (gone, out of budget, refusing) isn't: the link still works.
+      if (chosen || !(e instanceof CliError)) throw e
+      relayError = e.message.replace(/\. Use --no-relay to get a link instead$/, '')
+      info(`The relay couldn't publish it (${relayError}). Here's a link instead.`)
+    }
   }
   const url = handoffUrl(siteFor(opts), h)
   if (ctx.network !== 'mainnet' && !opts.site) info(`thurin.id runs mainnet; for ${ctx.network}, point the link at a ${ctx.network} build with --site <url>.`)
-  out({ authorized: true, op, owner, fingerprint: fpr, network: ctx.network, index, nonce, deadline, url }, () =>
-    `${head}Open this link where a funded wallet is, or send it to whoever is paying:\n\n${url}\n`)
+  out({ authorized: true, op, owner, fingerprint: fpr, network: ctx.network, index, nonce, deadline, url, ...(relayError ? { relayError } : {}) }, () =>
+    `${head}Open this link to publish it (thurin.id can publish it for you), or send it to someone who will:\n\n${url}\n`)
   await offerToOpen(url, isJson())
 }
 

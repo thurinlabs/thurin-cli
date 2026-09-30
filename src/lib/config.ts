@@ -29,3 +29,7 @@ export function ensureKeystoreDir() {
   if (!existsSync(KEYSTORE_DIR)) mkdirSync(KEYSTORE_DIR, { recursive: true, mode: 0o700 })
   return KEYSTORE_DIR
 }
+
+/** The relay `--authorize` tries when none is set (--relay, or `relay` in the config); `--no-relay` skips it.
+ *  If it can't publish (gone, out of budget, refuses), the CLI hands out the link instead. */
+export const DEFAULT_RELAY: Partial<Record<string, string>> = { mainnet: 'https://relay.thurin.id' }
